@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 authors = [
-    { name = "Travis Risner", email = "firestrand@gmail.com" },
+    { name = "Travis Silvers", email = "firestrand@gmail.com" },
 ]
 keywords = [
     "finance",
@@ -56,8 +56,8 @@ dev = [
 liq-scan = "liq.scan.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/firestrand/liq-scan"
-Repository = "https://github.com/firestrand/liq-scan"
+Homepage = "https://github.com/Latent-Infinity/liq-scan"
+Repository = "https://github.com/Latent-Infinity/liq-scan"
 
 [tool.uv]
 [tool.uv.sources]

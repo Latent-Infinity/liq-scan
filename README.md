@@ -64,8 +64,8 @@ uv run ruff check src tests
 uv run ty check src
 ```
 
-See `AGENT_STATE.md` for the current execution-branch state under the
-liq-scan plan.
+See `AGENT_STATE.md` for the current repo state under the liq-scan
+plan.
 
 ## License
 

@@ -9,14 +9,14 @@ this file is the per-repo view.
 | --- | --- |
 | Plan | [`../liq-docs/plans/liq-scan-plan.md`](../liq-docs/plans/liq-scan-plan.md) |
 | Requirements | [`../liq-docs/requirements/liq-scan-requirements.md`](../liq-docs/requirements/liq-scan-requirements.md) |
-| Execution branch | `agent/liq-scan-plan` |
+| Execution branch | `main` (single-developer model) |
 | Last updated | 2026-06-12 |
 
 ## Phase status
 
 | Phase | Status | Verify | Commit | Artifact | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 0 — Foundation | done | green | `6fc19f8` | _(greenfield Phase 0; commit-only evidence)_ | Greenfield init + req-path-rename refresh |
+| 0 — Foundation | done | green | `d158edf` | _(greenfield Phase 0; commit-only evidence)_ | Greenfield init + req-path-rename refresh + clean lock resolution |
 | 1 / 1H | todo |  |  |  | n/a — DatabentoProvider lives in liq-data |
 | 2 / 2H | todo |  |  |  | n/a — universes live in liq-data |
 | 3 / 3H | todo |  |  |  | n/a — read_multi lives in liq-store |
