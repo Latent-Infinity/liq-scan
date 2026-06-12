@@ -1,0 +1,36 @@
+# AGENT_STATE — liq-scan
+
+Resumption ledger for autonomous plan execution. Mirrors the workspace
+coordinator file at
+[`../liq-docs/plans/liq-scan-plan-state.md`](../liq-docs/plans/liq-scan-plan-state.md);
+this file is the per-repo view.
+
+| Field | Value |
+| --- | --- |
+| Plan | [`../liq-docs/plans/liq-scan-plan.md`](../liq-docs/plans/liq-scan-plan.md) |
+| PRD | [`../liq-docs/requirements/liq-scan-prd.md`](../liq-docs/requirements/liq-scan-prd.md) |
+| Execution branch | `agent/liq-scan-plan` |
+| Last updated | 2026-06-12 |
+
+## Phase status
+
+| Phase | Status | Verify | Commit | Artifact | Notes |
+| --- | --- | --- | --- | --- | --- |
+| 0 — Foundation | in_progress |  |  |  | Greenfield init in progress |
+| 1 / 1H | todo |  |  |  | n/a — DatabentoProvider lives in liq-data |
+| 2 / 2H | todo |  |  |  | n/a — universes live in liq-data |
+| 3 / 3H | todo |  |  |  | n/a — read_multi lives in liq-store |
+| 4 — MVP ScanEngine.execute | todo |  |  |  | First implementation phase here |
+| 4H — Harden execute | todo |  |  |  |  |
+| 5 — MVP sweep + persistence | todo |  |  |  |  |
+| 5H — Harden sweep | todo |  |  |  |  |
+| F — Docs polish | todo |  |  |  |  |
+| F+1 — Final verification | todo |  |  |  | Merge to base |
+
+## Open follow-ups
+
+_None._
+
+## Blocked entries
+
+_None._

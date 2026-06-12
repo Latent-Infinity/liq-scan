@@ -1,0 +1,116 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "liq-scan"
+version = "0.0.1"
+description = "Cross-sectional universe screening for the LIQ Stack"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Travis Risner", email = "firestrand@gmail.com" },
+]
+keywords = [
+    "finance",
+    "trading",
+    "scanner",
+    "screening",
+    "universe",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial",
+    "Typing :: Typed",
+]
+dependencies = [
+    "liq-core>=0.1.1",
+    "liq-store>=0.1.1",
+    "liq-data>=0.1.1",
+    "polars>=1.20",
+    "pyarrow>=18.0",
+    "pydantic>=2.10",
+    "typer>=0.15",
+    "rich>=13.9",
+]
+
+[project.optional-dependencies]
+features = ["liq-features>=0.1.0"]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "hypothesis>=6.120",
+    "ruff>=0.14",
+    "ty>=0.0.1",
+]
+
+[project.scripts]
+liq-scan = "liq.scan.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/firestrand/liq-scan"
+Repository = "https://github.com/firestrand/liq-scan"
+
+[tool.uv]
+[tool.uv.sources]
+liq-core = { path = "../liq-core", editable = true }
+liq-store = { path = "../liq-store", editable = true }
+liq-data = { path = "../liq-data", editable = true }
+liq-features = { path = "../liq-features", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/liq"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.coverage.run]
+source = ["src/liq/scan"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+    "pass",
+]
+
+[tool.ty.environment]
+extra-paths = ["./src"]
+
+[tool.ty.rules]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "B",
+    "C4",
+    "UP",
+    "ARG",
+    "SIM",
+]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["liq"]
