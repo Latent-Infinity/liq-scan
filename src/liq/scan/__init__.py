@@ -1,7 +1,8 @@
 """liq-scan — cross-sectional universe screening for the LIQ Stack.
 
-Phase 0: package importable, CLI scaffold, no business logic.
-Real contracts (ScanQuery, ScanEngine, predicates) land in Phase 4 / 5.
+Currently scaffolding only: package importable, CLI wired, no
+business logic. Real contracts (``ScanQuery``, ``ScanEngine``,
+predicate combinators) are planned and not yet implemented.
 """
 
 from __future__ import annotations

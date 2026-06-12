@@ -1,7 +1,8 @@
-"""Phase 0 smoke: the ``liq-scan`` CLI wires up and ``--help`` returns 0.
+"""Smoke: the ``liq-scan`` CLI wires up and ``--help`` returns 0.
 
-Real subcommand tests land in Phase 4 / 5; this protects against the
-console-script entry point or typer wiring regressing.
+Subcommand-specific tests come with the subcommands; this file
+exists so the console-script entry point and typer wiring can't
+regress silently while the rest of the library is still scaffolding.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """Exception hierarchy for liq-scan.
 
 Mirrors plan §Error Handling Standards. Concrete error subclasses are
-imported by future-phase modules; here we declare the base + the
-load-bearing leaf errors so the contract tests can reference them.
+imported by later modules; here we declare the base + the load-bearing
+leaf errors so the contract tests can reference them.
 
 All ``LiqScanError`` subclasses carry an ``event`` (snake_case) and
 ``correlation_id`` for structured logging — wired in the modules that

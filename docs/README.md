@@ -1,18 +1,20 @@
 # liq-scan documentation
 
-Per-phase docs land here as the plan progresses:
+Per-feature docs land here as the library grows. None of the docs
+listed below are written yet — they appear as the corresponding code
+lands.
 
-| Doc | Lands in phase |
+| Doc | Subject |
 | --- | --- |
-| `scan-query.md` | 4 |
-| `predicates.md` | 4 |
-| `window-spec.md` | 4 |
-| `coverage-gap.md` | 4 |
-| `sweep.md` | 5 |
-| `scan-persistence.md` | 5 |
-| `pit-policy.md` | 5 |
-| `exceptions.md` | 4 / 5 (appended on each hardening) |
-| `logging.md` | 4 / 5 (appended on each hardening) |
+| `scan-query.md` | `ScanQuery` contract |
+| `predicates.md` | Predicate combinators (move / dollar-volume / price) |
+| `window-spec.md` | `WindowSpec` discriminated union + calendar semantics |
+| `coverage-gap.md` | `CoverageGapError` payload + loud-fail policy |
+| `sweep.md` | Historical sweep mode + per-as-of universe resolution |
+| `scan-persistence.md` | Persisted scan-run layout in `liq-store` |
+| `pit-policy.md` | Point-in-time correctness rules |
+| `exceptions.md` | Exception hierarchy reference (appended on each hardening pass) |
+| `logging.md` | Structured log event catalog (appended on each hardening pass) |
 
-Phase 0 leaves this directory intentionally empty save for this
-placeholder.
+This directory is intentionally empty save for this placeholder while
+the library is still scaffolding.

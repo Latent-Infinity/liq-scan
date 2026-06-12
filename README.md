@@ -2,9 +2,10 @@
 
 Cross-sectional universe screening for the LIQ Stack.
 
-> **Status:** Phase 0 scaffolding only. No business logic yet. See
+> **Status:** scaffolding only — package importable, CLI wired, no
+> business logic yet. See
 > [`../liq-docs/plans/liq-scan-plan.md`](../liq-docs/plans/liq-scan-plan.md)
-> for the phased delivery plan and
+> for the delivery plan and
 > [`../liq-docs/requirements/liq-scan-requirements.md`](../liq-docs/requirements/liq-scan-requirements.md)
 > for the requirements spec.
 
@@ -40,8 +41,9 @@ libraries; see [the dependency graph](../liq-docs/architecture/liq-stack-spec.md
 
 ## Quickstart
 
-> _Coming in Phase 4 (single query) and Phase 5 (sweep). The CLI is
-> wired but currently exposes only `--help`._
+> _The `execute` (single query) and `sweep` (historical) subcommands
+> are planned, not yet implemented. The CLI is wired but currently
+> exposes only `--help`._
 
 ```bash
 # Future shape (not yet implemented):

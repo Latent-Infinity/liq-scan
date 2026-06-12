@@ -1,7 +1,8 @@
 """CLI entry point for ``liq-scan``.
 
-Phase 0: scaffold only — ``liq-scan --help`` returns 0. Real
-subcommands (``execute``, ``sweep``, ``--dry-run``) land in Phase 4 / 5.
+Currently scaffold only — ``liq-scan --help`` and ``--version`` return 0.
+Real subcommands (``execute``, ``sweep``, ``--dry-run``) are planned
+and not yet wired.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ def root(
 ) -> None:
     """liq-scan CLI root.
 
-    Subcommands (``execute``, ``sweep``) are wired in Phase 4 / 5.
+    Subcommands (``execute``, ``sweep``) are planned, not yet wired.
     """
 
 
