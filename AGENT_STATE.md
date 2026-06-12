@@ -16,7 +16,7 @@ this file is the per-repo view.
 
 | Phase | Status | Verify | Commit | Artifact | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 0 — Foundation | in_progress |  |  |  | Greenfield init in progress |
+| 0 — Foundation | done | green | `6fc19f8` | _(greenfield Phase 0; commit-only evidence)_ | Greenfield init + req-path-rename refresh |
 | 1 / 1H | todo |  |  |  | n/a — DatabentoProvider lives in liq-data |
 | 2 / 2H | todo |  |  |  | n/a — universes live in liq-data |
 | 3 / 3H | todo |  |  |  | n/a — read_multi lives in liq-store |
