@@ -5,8 +5,8 @@ Cross-sectional universe screening for the LIQ Stack.
 > **Status:** Phase 0 scaffolding only. No business logic yet. See
 > [`../liq-docs/plans/liq-scan-plan.md`](../liq-docs/plans/liq-scan-plan.md)
 > for the phased delivery plan and
-> [`../liq-docs/requirements/liq-scan-prd.md`](../liq-docs/requirements/liq-scan-prd.md)
-> for the PRD.
+> [`../liq-docs/requirements/liq-scan-requirements.md`](../liq-docs/requirements/liq-scan-requirements.md)
+> for the requirements spec.
 
 ## What this library does
 

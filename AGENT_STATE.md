@@ -8,7 +8,7 @@ this file is the per-repo view.
 | Field | Value |
 | --- | --- |
 | Plan | [`../liq-docs/plans/liq-scan-plan.md`](../liq-docs/plans/liq-scan-plan.md) |
-| PRD | [`../liq-docs/requirements/liq-scan-prd.md`](../liq-docs/requirements/liq-scan-prd.md) |
+| Requirements | [`../liq-docs/requirements/liq-scan-requirements.md`](../liq-docs/requirements/liq-scan-requirements.md) |
 | Execution branch | `agent/liq-scan-plan` |
 | Last updated | 2026-06-12 |
 
