@@ -1,9 +1,8 @@
-"""Contract stub for ``ScanEngine.sweep`` (planned, not built).
+"""Contract stub for ``ScanEngine.sweep``.
 
 Strict xfail; flips green when the historical sweep + persistence
-land per the liq-scan plan §3.10. ``sweep`` must refuse non-PIT
-universes (invariant I-7) before any read — that requirement gets
-its own real test alongside the implementation.
+land. ``sweep`` must refuse non-PIT universes before any read — that
+requirement gets its own real test alongside the implementation.
 """
 
 from __future__ import annotations

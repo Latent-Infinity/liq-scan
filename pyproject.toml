@@ -40,6 +40,7 @@ dependencies = [
     "pydantic>=2.10",
     "typer>=0.15",
     "rich>=13.9",
+    "jsonschema>=4.20",
 ]
 
 [project.optional-dependencies]
@@ -71,7 +72,7 @@ packages = ["src/liq"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra -q"
+addopts = "-ra -q --cov=liq.scan --cov-report=term-missing --cov-fail-under=90"
 
 [tool.coverage.run]
 source = ["src/liq/scan"]
@@ -111,6 +112,12 @@ select = [
 ignore = [
     "E501",
 ]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["typer.Option", "typer.Argument"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG001", "ARG002"]  # Allow unused fixture args
 
 [tool.ruff.lint.isort]
 known-first-party = ["liq"]

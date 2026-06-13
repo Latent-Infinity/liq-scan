@@ -1,15 +1,24 @@
 """CLI entry point for ``liq-scan``.
 
-Currently scaffold only — ``liq-scan --help`` and ``--version`` return 0.
-Real subcommands (``execute``, ``sweep``, ``--dry-run``) are planned
-and not yet wired.
+``liq-scan execute`` runs a single :class:`ScanQuery` and prints
+the ranked ``ScanResult`` list to stdout as JSON. Structured logs
+go to stderr. ``--help`` / ``--version`` return 0.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import sys
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
 import typer
 
 from liq.scan import __version__
+from liq.scan.exceptions import CoverageGapError
 
 app = typer.Typer(
     name="liq-scan",
@@ -35,10 +44,104 @@ def root(
         help="Show the liq-scan version and exit.",
     ),
 ) -> None:
-    """liq-scan CLI root.
+    """liq-scan CLI root."""
 
-    Subcommands (``execute``, ``sweep``) are planned, not yet wired.
-    """
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _build_engine(data_root: Path) -> Any:
+    """Construct DataService + ParquetStore + ScanEngine wired together."""
+    from liq.data.service import DataService
+    from liq.data.settings import get_settings, get_store
+    from liq.scan.engine import ScanEngine
+    from liq.store.parquet import ParquetStore
+
+    os.environ["DATA_ROOT"] = str(data_root)
+    get_settings.cache_clear()
+    get_store.cache_clear()
+
+    data_service = DataService()
+    store = ParquetStore(str(data_root))
+    return ScanEngine(data_service=data_service, store=store)
+
+
+@app.command("execute")
+def execute(
+    universe: str = typer.Option(
+        ..., "--universe", help="Universe name or comma-separated symbols."
+    ),
+    as_of: str = typer.Option(..., "--as-of", help="ISO timestamp (tz-aware)."),
+    window: str = typer.Option(..., "--window", help="Window spec (e.g. 'trading_minutes:390')."),
+    threshold: float = typer.Option(5.0, "--threshold", help="Move-percent threshold."),
+    direction: str = typer.Option("either", "--direction", help="up|down|either"),
+    limit: int | None = typer.Option(None, "--limit"),
+    data_root: Path | None = typer.Option(
+        None,
+        "--data-root",
+        help="Root directory for parquet store + manifest (default: ./data).",
+    ),
+    output: str = typer.Option("json", "--output", help="json|table (table is a fallback)."),
+) -> None:
+    """Run one ScanQuery and emit the ranked result list."""
+    from liq.scan.predicates import MovePredicate
+    from liq.scan.query import ScanQuery
+    from liq.scan.window import parse_window_spec
+
+    if direction == "up":
+        predicate = MovePredicate(threshold_pct=threshold, direction="up")
+    elif direction == "down":
+        predicate = MovePredicate(threshold_pct=threshold, direction="down")
+    elif direction == "either":
+        predicate = MovePredicate(threshold_pct=threshold, direction="either")
+    else:
+        typer.echo(f"direction must be up|down|either; got {direction!r}", err=True)
+        raise typer.Exit(code=1)
+
+    universe_ref: str | list[str] = (
+        [s.strip().upper() for s in universe.split(",") if s.strip()]
+        if "," in universe
+        else universe
+    )
+    as_of_dt = datetime.fromisoformat(as_of)
+    window_spec = parse_window_spec(window)
+    ranking = "abs_move" if direction == "either" else "up" if direction == "up" else "down"
+    query = ScanQuery(
+        universe_ref=universe_ref,
+        as_of=as_of_dt,
+        window=window_spec,
+        predicate=predicate,
+        ranking=ranking,
+        limit=limit,
+    )
+
+    engine = _build_engine(data_root if data_root is not None else Path.cwd() / "data")
+
+    try:
+        results = engine.execute(query)
+    except CoverageGapError as exc:
+        payload = {
+            "error": "coverage_gap",
+            "message": str(exc),
+            "missing": [
+                {"symbol": sym, "gaps": [[s.isoformat(), e.isoformat()] for s, e in gaps]}
+                for sym, gaps in exc.missing
+            ],
+        }
+        typer.echo(json.dumps(payload), err=True)
+        raise typer.Exit(code=2) from exc
+
+    if output == "json":
+        rows = [r.model_dump(mode="json") for r in results]
+        typer.echo(json.dumps(rows, default=_json_default))
+    else:
+        for r in results:
+            print(f"{r.symbol}\t{r.move_pct:+.2f}%\t{r.direction}", file=sys.stdout)
 
 
 def main() -> None:

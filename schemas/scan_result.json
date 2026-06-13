@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScanResult",
+  "type": "object",
+  "required": [
+    "symbol",
+    "as_of",
+    "move_pct",
+    "direction",
+    "window_actual",
+    "bar_count",
+    "dollar_volume",
+    "metric_version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "symbol": {"type": "string", "minLength": 1},
+    "as_of": {"type": "string", "format": "date-time"},
+    "move_pct": {"type": "number"},
+    "direction": {"type": "string", "enum": ["up", "down", "flat"]},
+    "window_actual": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"type": "string", "format": "date-time"}
+    },
+    "bar_count": {"type": "integer", "minimum": 0},
+    "dollar_volume": {
+      "oneOf": [
+        {"type": "string"},
+        {"type": "number"}
+      ]
+    },
+    "metric_version": {"type": "string", "minLength": 1},
+    "split_event": {
+      "oneOf": [
+        {"type": "string"},
+        {"type": "null"}
+      ]
+    }
+  }
+}

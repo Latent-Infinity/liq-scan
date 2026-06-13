@@ -1,8 +1,8 @@
 """Exception hierarchy for liq-scan.
 
-Mirrors plan §Error Handling Standards. Concrete error subclasses are
-imported by later modules; here we declare the base + the load-bearing
-leaf errors so the contract tests can reference them.
+Concrete error subclasses are imported by later modules; here we
+declare the base + the load-bearing leaf errors so tests and callers
+can reference them.
 
 All ``LiqScanError`` subclasses carry an ``event`` (snake_case) and
 ``correlation_id`` for structured logging — wired in the modules that
@@ -10,6 +10,8 @@ raise them, not on the base, so the constructor stays inspection-free.
 """
 
 from __future__ import annotations
+
+from datetime import datetime
 
 
 class LiqScanError(Exception):
@@ -21,15 +23,25 @@ class ScanValidationError(LiqScanError):
 
 
 class CoverageGapError(LiqScanError):
-    """FR-9 loud fail: required (symbol × window) not covered in the manifest.
+    """Required (symbol × window) not covered in the manifest.
 
-    The exception payload enumerates the gap (per-symbol missing ranges)
-    so the operator can act on it without re-running the scan.
+    Carries ``missing`` — a list of ``(symbol, gap_ranges)`` pairs
+    enumerating uncovered slices per symbol — so the operator can act
+    on it without re-running the scan.
     """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        missing: list[tuple[str, list[tuple[datetime, datetime]]]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.missing: list[tuple[str, list[tuple[datetime, datetime]]]] = missing or []
 
 
 class NonPITUniverseError(LiqScanError):
-    """I-7: a sweep refused a non-PIT resolved universe.
+    """A sweep refused a non-point-in-time resolved universe.
 
     Raised before any read so non-PIT data cannot contaminate a label
     artifact even by accident.
