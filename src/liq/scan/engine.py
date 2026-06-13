@@ -19,15 +19,18 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
+from uuid import NAMESPACE_URL, uuid5
 
 import polars as pl
 
 from liq.scan.exceptions import CoverageGapError
 from liq.scan.predicates import PredicateInput
 from liq.scan.query import ScanQuery, ScanResult
+from liq.scan.window import TradingMinutesWindow
 
 if TYPE_CHECKING:
     from liq.data.service import DataService
@@ -39,6 +42,18 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PROVIDER = "databento"
 _DEFAULT_DATASET = "EQUS.MINI"
 _DEFAULT_TIMEFRAME = "1m"
+
+
+@dataclass(frozen=True)
+class _SplitEvent:
+    symbol: str
+    timestamp: datetime
+    ratio: float
+
+    @property
+    def label(self) -> str:
+        ratio = f"{self.ratio:g}"
+        return f"split:{ratio}@{self.timestamp.isoformat()}"
 
 
 class ScanEngine:
@@ -64,18 +79,43 @@ class ScanEngine:
     # ----- public ---------------------------------------------------
 
     def execute(self, query: ScanQuery) -> list[ScanResult]:
+        scan_run_id = _scan_run_id(query)
+        self._log_event(
+            "scan_started",
+            scan_run_id=scan_run_id,
+            as_of=query.as_of.isoformat(),
+            include_extended_hours=query.include_extended_hours,
+        )
         resolved = self._data_service.resolve_universe(
             query.universe_ref,
             as_of=query.as_of.date(),
             registry=self._registry,
         )
         symbols = list(resolved.symbols)
+        self._log_event(
+            "universe_resolved",
+            scan_run_id=scan_run_id,
+            symbols_count=len(symbols),
+            pit=bool(getattr(resolved, "pit", False)),
+        )
+
+        if not symbols:
+            self._log_event("empty_universe", scan_run_id=scan_run_id, level=logging.WARNING)
+            self._log_event("scan_completed", scan_run_id=scan_run_id, result_count=0)
+            return []
 
         # Step 2 — window-actual.
-        window_start, window_end = query.window.resolve(query.as_of)
+        window_start, window_end = self._resolve_window(query)
 
         # Step 3 — coverage check.
         gaps = self._coverage_gaps(symbols, window_start, window_end)
+        self._log_event(
+            "coverage_verified",
+            scan_run_id=scan_run_id,
+            missing_count=len(gaps),
+            window_start=window_start.isoformat(),
+            window_end=window_end.isoformat(),
+        )
         if gaps:
             raise CoverageGapError(
                 f"coverage gaps for {len(gaps)} symbol(s) in "
@@ -90,14 +130,37 @@ class ScanEngine:
             start=window_start,
             end=window_end,
         )
+        self._log_event(
+            "read_multi",
+            scan_run_id=scan_run_id,
+            keys_count=len(keys),
+            missing_count=len(result.missing_keys),
+            window_start=window_start.isoformat(),
+            window_end=window_end.isoformat(),
+        )
+        if result.missing_keys:
+            missing = [
+                (key.split("/")[1], [(window_start, window_end)]) for key in result.missing_keys
+            ]
+            raise CoverageGapError(
+                f"store returned no files for {len(result.missing_keys)} covered key(s)",
+                missing=missing,
+            )
         df = result.data
         if df.is_empty():
+            self._log_event(
+                "predicate_evaluated", scan_run_id=scan_run_id, evaluated_count=0, passed_count=0
+            )
+            self._log_event("scan_completed", scan_run_id=scan_run_id, result_count=0)
             return []
 
-        # Step 5 — split handling (stub): no corp-actions source wired
-        # yet. The path exists so the engine can be extended
-        # with a real adjuster without changing the call surface.
-        df, split_events = self._apply_split_handling(df, query.split_handling)
+        # Step 5 — split handling from stored corporate-action rows.
+        df, split_events = self._apply_split_handling(
+            df,
+            query.split_handling,
+            window_start=window_start,
+            window_end=window_end,
+        )
 
         # Step 6 — midrange-endpoint move metric (FR-7).
         per_symbol = self._compute_endpoint_move(df, k=self._infer_k(query))
@@ -116,11 +179,17 @@ class ScanEngine:
                 )
             )
         ]
+        self._log_event(
+            "predicate_evaluated",
+            scan_run_id=scan_run_id,
+            evaluated_count=len(per_symbol),
+            passed_count=len(passing),
+        )
         ranked = self._rank(passing, query.ranking)
         if query.limit is not None:
             ranked = ranked[: query.limit]
 
-        return [
+        results = [
             ScanResult(
                 symbol=str(row["symbol"]),
                 as_of=query.as_of,
@@ -134,8 +203,38 @@ class ScanEngine:
             )
             for row in ranked
         ]
+        self._log_event("scan_completed", scan_run_id=scan_run_id, result_count=len(results))
+        return results
 
     # ----- internal helpers -----------------------------------------
+
+    @staticmethod
+    def _log_event(
+        event: str,
+        *,
+        scan_run_id: str,
+        level: int = logging.INFO,
+        **fields: object,
+    ) -> None:
+        logger.log(
+            level,
+            event,
+            extra={
+                "event": event,
+                "scan_run_id": scan_run_id,
+                "correlation_id": scan_run_id,
+                "timestamp": datetime.now(tz=UTC).isoformat(),
+                **fields,
+            },
+        )
+
+    @staticmethod
+    def _resolve_window(query: ScanQuery) -> tuple[datetime, datetime]:
+        if query.include_extended_hours and isinstance(query.window, TradingMinutesWindow):
+            from liq.data.calendar import extended_trading_minutes_window
+
+            return extended_trading_minutes_window(query.as_of, query.window.n)
+        return query.window.resolve(query.as_of)
 
     def _coverage_gaps(
         self,
@@ -180,12 +279,75 @@ class ScanEngine:
         self,
         df: pl.DataFrame,
         handling: str,
+        *,
+        window_start: datetime,
+        window_end: datetime,
     ) -> tuple[pl.DataFrame, dict[str, str]]:
-        """Apply split handling once a corporate-actions source is wired."""
-        # Acknowledge the parameter so future implementations have a
-        # behavioural hook to extend.
-        del handling
-        return df, {}
+        """Adjust or exclude windows spanning split events."""
+        events = self._split_events(df, window_start=window_start, window_end=window_end)
+        if not events:
+            return df, {}
+
+        split_events = {event.symbol: event.label for event in events}
+        if handling == "exclude":
+            return df.filter(~pl.col("symbol").is_in(list(split_events))), split_events
+
+        adjusted = df
+        price_cols = [c for c in ("open", "high", "low", "close") if c in adjusted.columns]
+        for event in events:
+            for col in price_cols:
+                adjusted = adjusted.with_columns(
+                    pl.when(
+                        (pl.col("symbol") == event.symbol) & (pl.col("timestamp") < event.timestamp)
+                    )
+                    .then(pl.col(col) * event.ratio)
+                    .otherwise(pl.col(col))
+                    .alias(col)
+                )
+        return adjusted, split_events
+
+    def _split_events(
+        self,
+        df: pl.DataFrame,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> list[_SplitEvent]:
+        events: list[_SplitEvent] = []
+        symbols = (
+            [str(s) for s in df["symbol"].unique().to_list()] if "symbol" in df.columns else []
+        )
+        for symbol in symbols:
+            event = self._first_split_event(
+                symbol, window_start=window_start, window_end=window_end
+            )
+            if event is not None:
+                events.append(event)
+        return events
+
+    def _first_split_event(
+        self,
+        symbol: str,
+        *,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> _SplitEvent | None:
+        key = f"{self._provider}/{symbol}/corp_actions"
+        if not self._store.exists(key):
+            return None
+        actions = self._store.read(key)
+        if actions.is_empty():
+            return None
+        for row in actions.iter_rows(named=True):
+            if not _is_split_action(row):
+                continue
+            timestamp = _action_timestamp(row)
+            ratio = _action_ratio(row)
+            if timestamp is None or ratio is None or ratio <= 0:
+                continue
+            if window_start <= timestamp < window_end:
+                return _SplitEvent(symbol=symbol, timestamp=timestamp, ratio=ratio)
+        return None
 
     def _compute_endpoint_move(
         self,
@@ -255,6 +417,50 @@ def _to_float(value: object) -> float:
     if isinstance(value, Decimal):
         return float(value)
     return 0.0
+
+
+def _scan_run_id(query: ScanQuery) -> str:
+    return str(uuid5(NAMESPACE_URL, query.model_dump_json()))
+
+
+def _is_split_action(row: dict[str, Any]) -> bool:
+    kind = row.get("type") or row.get("event") or row.get("action")
+    if kind is None:
+        return True
+    return "split" in str(kind).lower()
+
+
+def _action_timestamp(row: dict[str, Any]) -> datetime | None:
+    raw = row.get("timestamp") or row.get("ex_date") or row.get("date")
+    if isinstance(raw, datetime):
+        return raw.astimezone(UTC) if raw.tzinfo is not None else raw.replace(tzinfo=UTC)
+    if isinstance(raw, date):
+        return datetime.combine(raw, datetime.min.time(), tzinfo=UTC)
+    if isinstance(raw, str):
+        parsed = datetime.fromisoformat(raw)
+        return parsed.astimezone(UTC) if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return None
+
+
+def _action_ratio(row: dict[str, Any]) -> float | None:
+    for key in ("ratio", "split_ratio", "adjustment_factor"):
+        value = row.get(key)
+        if isinstance(value, int | float | Decimal):
+            return float(value)
+        if isinstance(value, str):
+            if ":" in value:
+                left, _, right = value.partition(":")
+                numerator = float(left)
+                denominator = float(right)
+                return denominator / numerator
+            return float(value)
+    numerator = row.get("numerator")
+    denominator = row.get("denominator")
+    if isinstance(numerator, int | float | Decimal) and isinstance(
+        denominator, int | float | Decimal
+    ):
+        return float(denominator) / float(numerator)
+    return None
 
 
 __all__ = ["ScanEngine"]

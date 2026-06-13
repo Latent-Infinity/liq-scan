@@ -30,7 +30,7 @@ class ScanQuery(BaseModel):
     window: WindowSpec
     predicate: AnyPredicate
     ranking: Ranking = "abs_move"
-    limit: int | None = Field(default=None, ge=0)
+    limit: int | None = Field(default=None, gt=0)
     include_extended_hours: bool = False
     metric_version: str = "midrange-endpoint-v1"
     split_handling: SplitHandling = "adjust"

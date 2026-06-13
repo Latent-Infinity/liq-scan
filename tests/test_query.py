@@ -52,6 +52,10 @@ class TestScanQueryValidation:
         with pytest.raises(ValidationError):
             _basic_query(limit=-1)
 
+    def test_rejects_zero_limit(self) -> None:
+        with pytest.raises(ValidationError):
+            _basic_query(limit=0)
+
     def test_rejects_unknown_ranking(self) -> None:
         with pytest.raises(ValidationError):
             _basic_query(ranking="random")

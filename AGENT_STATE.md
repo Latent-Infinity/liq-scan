@@ -10,7 +10,7 @@ this file is the per-repo view.
 | Plan | [`../liq-docs/plans/liq-scan-plan.md`](../liq-docs/plans/liq-scan-plan.md) |
 | Requirements | [`../liq-docs/requirements/liq-scan-requirements.md`](../liq-docs/requirements/liq-scan-requirements.md) |
 | Execution branch | `main` (single-developer model) |
-| Last updated | 2026-06-12 |
+| Last updated | 2026-06-13 |
 
 ## Phase status
 
@@ -20,8 +20,8 @@ this file is the per-repo view.
 | 1 / 1H | todo |  |  |  | n/a — DatabentoProvider lives in liq-data |
 | 2 / 2H | todo |  |  |  | n/a — universes live in liq-data |
 | 3 / 3H | todo |  |  |  | n/a — read_multi lives in liq-store |
-| 4 — MVP ScanEngine.execute | todo |  |  |  | First implementation phase here |
-| 4H — Harden execute | todo |  |  |  |  |
+| 4 — MVP ScanEngine.execute | done | green | `805ea49` | `docs/scan-query.md`, `docs/predicates.md`, `docs/window-spec.md`, `docs/coverage-gap.md`, `schemas/scan_result.json` | Query contracts, CLI, coverage checks, predicate evaluation, and read path |
+| 4H — Harden execute | done | green | _(this commit)_ | `tests/test_execute_hardening.py` | Split handling, calendar edges, extended-hours path, empty-universe warning, and scan event reconstruction |
 | 5 — MVP sweep + persistence | todo |  |  |  |  |
 | 5H — Harden sweep | todo |  |  |  |  |
 | F — Docs polish | todo |  |  |  |  |
