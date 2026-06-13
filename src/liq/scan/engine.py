@@ -6,7 +6,7 @@
    uncovered (symbol × window) slice.
 4. Read bars via :meth:`ParquetStore.read_multi`.
 5. Apply split handling (no-op stub when no corporate-actions table).
-6. Compute the midrange-endpoint move metric (FR-7).
+6. Compute the midrange-endpoint move metric.
 7. Evaluate predicates, rank, truncate to ``limit``.
 
 The engine is dependency-injected: tests pass a real ``DataService``
@@ -17,6 +17,7 @@ already has bars.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -27,9 +28,22 @@ from uuid import NAMESPACE_URL, uuid5
 
 import polars as pl
 
-from liq.scan.exceptions import CoverageGapError
+from liq.scan.exceptions import CoverageGapError, NonPITUniverseError
+from liq.scan.persistence import (
+    SweepArtifacts,
+    append_runs,
+    compute_sweep_id,
+    list_persisted_as_ofs,
+    load_runs,
+    mark_as_of_complete,
+    results_to_frame,
+    sweep_data_version_hash,
+    upsert_universe_snapshot,
+    write_meta,
+)
 from liq.scan.predicates import PredicateInput
-from liq.scan.query import ScanQuery, ScanResult
+from liq.scan.query import ScanQuery, ScanQueryTemplate, ScanResult
+from liq.scan.sweep import SweepConfig, as_of_timestamps, filter_remaining
 from liq.scan.window import TradingMinutesWindow
 
 if TYPE_CHECKING:
@@ -162,7 +176,7 @@ class ScanEngine:
             window_end=window_end,
         )
 
-        # Step 6 — midrange-endpoint move metric (FR-7).
+        # Step 6 — midrange-endpoint move metric.
         per_symbol = self._compute_endpoint_move(df, k=self._infer_k(query))
 
         # Step 7 — predicate + rank + limit.
@@ -205,6 +219,116 @@ class ScanEngine:
         ]
         self._log_event("scan_completed", scan_run_id=scan_run_id, result_count=len(results))
         return results
+
+    def sweep(
+        self,
+        template: ScanQueryTemplate,
+        config: SweepConfig,
+    ) -> SweepArtifacts:
+        """Historical sweep of ``template`` across ``config``'s as-ofs.
+
+        For each as-of, re-resolves the universe (so composite-kind
+        membership changes through time are honored), refuses non-PIT
+        universes immediately, and runs :meth:`execute`.
+        Results stream into the persisted sweep folder under the
+        store; a resumed sweep skips already-persisted as-ofs.
+        """
+        sweep_id = compute_sweep_id(config)
+        sweep_run_id = f"sweep:{sweep_id}"
+        self._log_event(
+            "sweep_started",
+            scan_run_id=sweep_run_id,
+            query_name=config.query_name,
+            sweep_id=sweep_id,
+            cadence=config.cadence,
+            start=config.start.isoformat(),
+            end=config.end.isoformat(),
+        )
+
+        as_ofs = as_of_timestamps(config)
+        already_done = list_persisted_as_ofs(self._store, config)
+        remaining = filter_remaining(as_ofs, already_done)
+        resumed_from = max(already_done) if already_done else None
+        if resumed_from is not None:
+            self._log_event(
+                "sweep_resumed",
+                scan_run_id=sweep_run_id,
+                resumed_from=resumed_from.isoformat(),
+                remaining=len(remaining),
+            )
+
+        template_json = template.model_dump_json()
+        query_hash = _template_hash(template)
+        write_meta(
+            self._store,
+            config,
+            query_hash=query_hash,
+            template_json=template_json,
+        )
+
+        runs_count = 0
+        for as_of in remaining:
+            query = template.with_as_of(as_of)
+            resolved = self._data_service.resolve_universe(
+                query.universe_ref,
+                as_of=as_of.date(),
+                registry=self._registry,
+            )
+            if not bool(getattr(resolved, "pit", False)):
+                raise NonPITUniverseError(
+                    f"sweep refuses non-PIT universe at as_of={as_of.isoformat()}"
+                )
+
+            symbols = list(resolved.symbols)
+            uni_hash = upsert_universe_snapshot(self._store, config, as_of=as_of, symbols=symbols)
+            self._log_event(
+                "sweep_as_of",
+                scan_run_id=sweep_run_id,
+                as_of=as_of.isoformat(),
+                universe_hash=uni_hash,
+            )
+
+            results = self.execute(query)
+            frame = results_to_frame(results, universe_hash_value=uni_hash)
+            append_runs(self._store, config, frame)
+            mark_as_of_complete(self._store, config, as_of)
+            runs_count += frame.height
+
+        # Re-count total persisted rows so resume counts correctly.
+        persisted_runs = load_runs(self._store, config)
+        total_runs = persisted_runs.height
+        total_sessions_with_hits = (
+            len({row["as_of"] for row in persisted_runs.select("as_of").iter_rows(named=True)})
+            if not persisted_runs.is_empty()
+            else 0
+        )
+        write_meta(
+            self._store,
+            config,
+            query_hash=query_hash,
+            template_json=template_json,
+            data_version_hash=sweep_data_version_hash(self._store, config),
+        )
+        self._log_event(
+            "sweep_completed",
+            scan_run_id=sweep_run_id,
+            sessions_scanned=len(as_ofs),
+            sessions_with_hits=total_sessions_with_hits,
+            runs_count=total_runs,
+        )
+        return SweepArtifacts(
+            query_name=config.query_name,
+            sweep_id=sweep_id,
+            runs_count=total_runs,
+            sessions_scanned=len(as_ofs),
+            sessions_with_hits=total_sessions_with_hits,
+            resumed_from=resumed_from,
+        )
+
+    @property
+    def store(self) -> ParquetStore:
+        """Expose the injected store for sweep persistence helpers + tests."""
+        return self._store
 
     # ----- internal helpers -----------------------------------------
 
@@ -421,6 +545,11 @@ def _to_float(value: object) -> float:
 
 def _scan_run_id(query: ScanQuery) -> str:
     return str(uuid5(NAMESPACE_URL, query.model_dump_json()))
+
+
+def _template_hash(template: ScanQueryTemplate) -> str:
+    """Stable SHA-256 of the template's JSON form."""
+    return hashlib.sha256(template.model_dump_json().encode("utf-8")).hexdigest()[:16]
 
 
 def _is_split_action(row: dict[str, Any]) -> bool:

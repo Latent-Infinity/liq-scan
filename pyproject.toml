@@ -41,6 +41,7 @@ dependencies = [
     "typer>=0.15",
     "rich>=13.9",
     "jsonschema>=4.20",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

@@ -3,13 +3,15 @@
 Both are frozen Pydantic models so they hash, compare, and round-trip
 through JSON without ceremony. ``ScanQuery`` is the operator's input
 to ``ScanEngine.execute``; ``ScanResult`` is the per-symbol output.
+``ScanQueryTemplate`` is the as-of-less shape used by sweeps and the
+``--query queries/*.yaml`` CLI flag.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -25,7 +27,7 @@ class ScanQuery(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    universe_ref: str | list[str]
+    universe_ref: Any
     as_of: datetime
     window: WindowSpec
     predicate: AnyPredicate
@@ -37,11 +39,10 @@ class ScanQuery(BaseModel):
 
     @field_validator("universe_ref")
     @classmethod
-    def _non_empty_universe(cls, value: str | list[str]) -> str | list[str]:
-        if isinstance(value, str):
-            if not value.strip():
-                raise ValueError("universe_ref string must be non-empty")
-        elif not value:
+    def _non_empty_universe(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("universe_ref string must be non-empty")
+        if isinstance(value, list) and not value:
             raise ValueError("universe_ref list must be non-empty")
         return value
 
@@ -69,4 +70,36 @@ class ScanResult(BaseModel):
     split_event: str | None = None
 
 
-__all__ = ["Ranking", "ScanQuery", "ScanResult", "SplitHandling"]
+class ScanQueryTemplate(BaseModel):
+    """A ``ScanQuery`` shape with ``as_of`` removed — fed to a sweep.
+
+    The sweep iterates as-of timestamps per cadence and builds one
+    concrete ``ScanQuery`` per iteration via :meth:`with_as_of`.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    universe_ref: Any
+    window: WindowSpec
+    predicate: AnyPredicate
+    ranking: Ranking = "abs_move"
+    limit: int | None = Field(default=None, gt=0)
+    include_extended_hours: bool = False
+    metric_version: str = "midrange-endpoint-v1"
+    split_handling: SplitHandling = "adjust"
+
+    def with_as_of(self, as_of: datetime) -> ScanQuery:
+        return ScanQuery(
+            universe_ref=self.universe_ref,
+            as_of=as_of,
+            window=self.window,
+            predicate=self.predicate,
+            ranking=self.ranking,
+            limit=self.limit,
+            include_extended_hours=self.include_extended_hours,
+            metric_version=self.metric_version,
+            split_handling=self.split_handling,
+        )
+
+
+__all__ = ["Ranking", "ScanQuery", "ScanQueryTemplate", "ScanResult", "SplitHandling"]

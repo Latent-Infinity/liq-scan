@@ -13,7 +13,7 @@ import sys
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 import typer
 
@@ -142,6 +142,64 @@ def execute(
     else:
         for r in results:
             print(f"{r.symbol}\t{r.move_pct:+.2f}%\t{r.direction}", file=sys.stdout)
+
+
+@app.command("sweep")
+def sweep_cmd(
+    query: Path = typer.Option(..., "--query", help="Path to yaml ScanQueryTemplate."),
+    start: str = typer.Option(..., "--start", help="ISO date (inclusive)."),
+    end: str = typer.Option(..., "--end", help="ISO date (inclusive)."),
+    query_name: str | None = typer.Option(
+        None, "--name", help="Sweep folder name; default = yaml file stem."
+    ),
+    cadence: str = typer.Option("session_close", "--cadence", help="session_close|minutes_n"),
+    interval_minutes: int | None = typer.Option(
+        None, "--interval-minutes", help="Required for cadence=minutes_n."
+    ),
+    data_root: Path | None = typer.Option(None, "--data-root"),
+    output: str = typer.Option("json", "--output", help="json|table"),
+) -> None:
+    """Run a historical sweep of a ScanQueryTemplate."""
+    from datetime import date as _date
+
+    from liq.scan.exceptions import NonPITUniverseError
+    from liq.scan.sweep import SweepConfig
+    from liq.scan.template_loader import load_query_template
+
+    if cadence not in ("session_close", "minutes_n"):
+        typer.echo(f"cadence must be session_close|minutes_n; got {cadence!r}", err=True)
+        raise typer.Exit(code=1)
+
+    template = load_query_template(query)
+    config = SweepConfig(
+        query_name=query_name or query.stem,
+        cadence=cast(Literal["session_close", "minutes_n"], cadence),
+        start=_date.fromisoformat(start),
+        end=_date.fromisoformat(end),
+        interval_minutes=interval_minutes,
+    )
+
+    engine = _build_engine(data_root if data_root is not None else Path.cwd() / "data")
+
+    try:
+        artifacts = engine.sweep(template, config)
+    except NonPITUniverseError as exc:
+        typer.echo(json.dumps({"error": "non_pit_universe", "message": str(exc)}), err=True)
+        raise typer.Exit(code=3) from exc
+
+    summary = {
+        "query_name": artifacts.query_name,
+        "sweep_id": artifacts.sweep_id,
+        "runs_count": artifacts.runs_count,
+        "sessions_scanned": artifacts.sessions_scanned,
+        "sessions_with_hits": artifacts.sessions_with_hits,
+        "resumed_from": (artifacts.resumed_from.isoformat() if artifacts.resumed_from else None),
+    }
+    if output == "json":
+        typer.echo(json.dumps(summary, default=_json_default))
+    else:
+        for k, v in summary.items():
+            print(f"{k}: {v}", file=sys.stdout)
 
 
 def main() -> None:

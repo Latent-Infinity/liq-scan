@@ -32,7 +32,7 @@ Pass when the signed move clears `threshold_pct`:
 | `either` | `abs(move_pct) >= threshold_pct` |
 
 `k` is the endpoint-aggregate window: open = mean of first `k` bars,
-close = mean of last `k` bars. Default `k=5` matches FR-7.
+close = mean of last `k` bars. Default `k=5`.
 
 ### `DollarVolumePredicate(min_usd)`
 

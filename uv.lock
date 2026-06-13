@@ -790,6 +790,7 @@ dependencies = [
     { name = "polars" },
     { name = "pyarrow" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "rich" },
     { name = "typer" },
 ]
@@ -819,6 +820,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.9" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.1" },
