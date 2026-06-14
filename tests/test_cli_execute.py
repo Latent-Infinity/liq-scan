@@ -16,6 +16,7 @@ import pytest
 from typer.testing import CliRunner
 
 from liq.data.manifest import CoverageManifest, CoverageRange
+from liq.data.universes import UniverseDefinition, UniverseKind, UniverseRegistry
 from liq.scan.cli import app
 from liq.store.parquet import ParquetStore
 
@@ -143,6 +144,84 @@ class TestExecuteCli:
 
         for row in rows:
             validate(instance=row, schema=schema)
+
+    def test_execute_tradable_flag_filters_results(self, seeded_root: Path) -> None:
+        """``--tradable`` accepts a comma-separated list and drops
+        non-tradable symbols from the JSON output."""
+        result = _runner.invoke(
+            app,
+            [
+                "execute",
+                "--universe",
+                "UPMOVE,DOWNMOVE",
+                "--as-of",
+                "2024-06-03T14:00:00+00:00",
+                "--window",
+                "trading_minutes:30",
+                "--threshold",
+                "5",
+                "--direction",
+                "either",
+                # Comma-separated → inline list (matches --universe semantics).
+                "--tradable",
+                "UPMOVE,DOES-NOT-EXIST",
+                "--data-root",
+                str(seeded_root),
+                "--output",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        names = {r["symbol"] for r in json.loads(result.output)}
+        assert "UPMOVE" in names
+        assert "DOWNMOVE" not in names
+
+    def test_execute_named_universe_and_named_tradable_use_registry(
+        self, seeded_root: Path
+    ) -> None:
+        registry = UniverseRegistry(seeded_root)
+        registry.save(
+            UniverseDefinition(
+                name="research-moves",
+                version=1,
+                kind=UniverseKind.EXPLICIT,
+                spec={"symbols": ["UPMOVE", "DOWNMOVE"]},
+            )
+        )
+        registry.save(
+            UniverseDefinition(
+                name="tradable-moves",
+                version=1,
+                kind=UniverseKind.EXPLICIT,
+                spec={"symbols": ["UPMOVE"]},
+            )
+        )
+
+        result = _runner.invoke(
+            app,
+            [
+                "execute",
+                "--universe",
+                "research-moves",
+                "--as-of",
+                "2024-06-03T14:00:00+00:00",
+                "--window",
+                "trading_minutes:30",
+                "--threshold",
+                "5",
+                "--direction",
+                "either",
+                "--tradable",
+                "tradable-moves",
+                "--data-root",
+                str(seeded_root),
+                "--output",
+                "json",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert [r["symbol"] for r in json.loads(result.output)] == ["UPMOVE"]
 
     def test_execute_coverage_gap_exit_code_two(self, seeded_root: Path) -> None:
         result = _runner.invoke(

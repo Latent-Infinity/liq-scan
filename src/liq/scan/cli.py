@@ -59,6 +59,7 @@ def _build_engine(data_root: Path) -> Any:
     """Construct DataService + ParquetStore + ScanEngine wired together."""
     from liq.data.service import DataService
     from liq.data.settings import get_settings, get_store
+    from liq.data.universes import UniverseRegistry
     from liq.scan.engine import ScanEngine
     from liq.store.parquet import ParquetStore
 
@@ -68,7 +69,8 @@ def _build_engine(data_root: Path) -> Any:
 
     data_service = DataService()
     store = ParquetStore(str(data_root))
-    return ScanEngine(data_service=data_service, store=store)
+    registry = UniverseRegistry(data_root)
+    return ScanEngine(data_service=data_service, store=store, registry=registry)
 
 
 @app.command("execute")
@@ -81,6 +83,15 @@ def execute(
     threshold: float = typer.Option(5.0, "--threshold", help="Move-percent threshold."),
     direction: str = typer.Option("either", "--direction", help="up|down|either"),
     limit: int | None = typer.Option(None, "--limit"),
+    tradable: str | None = typer.Option(
+        None,
+        "--tradable",
+        help=(
+            "Optional tradable-universe name or comma-separated symbols. "
+            "Filters results down to symbols you'd actually trade — applied "
+            "after rank + limit."
+        ),
+    ),
     data_root: Path | None = typer.Option(
         None,
         "--data-root",
@@ -103,11 +114,11 @@ def execute(
         typer.echo(f"direction must be up|down|either; got {direction!r}", err=True)
         raise typer.Exit(code=1)
 
-    universe_ref: str | list[str] = (
-        [s.strip().upper() for s in universe.split(",") if s.strip()]
-        if "," in universe
-        else universe
-    )
+    def _parse_ref(text: str) -> str | list[str]:
+        return [s.strip().upper() for s in text.split(",") if s.strip()] if "," in text else text
+
+    universe_ref: str | list[str] = _parse_ref(universe)
+    tradable_ref: str | list[str] | None = _parse_ref(tradable) if tradable else None
     as_of_dt = datetime.fromisoformat(as_of)
     window_spec = parse_window_spec(window)
     ranking = "abs_move" if direction == "either" else "up" if direction == "up" else "down"
@@ -118,6 +129,7 @@ def execute(
         predicate=predicate,
         ranking=ranking,
         limit=limit,
+        tradable_ref=tradable_ref,
     )
 
     engine = _build_engine(data_root if data_root is not None else Path.cwd() / "data")

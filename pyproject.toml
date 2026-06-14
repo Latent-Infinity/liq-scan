@@ -73,7 +73,10 @@ packages = ["src/liq"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra -q --cov=liq.scan --cov-report=term-missing --cov-fail-under=90"
+addopts = "-ra -q --cov=liq.scan --cov-report=term-missing --cov-fail-under=90 -m 'not perf'"
+markers = [
+    "perf: opt-in performance benchmarks (excluded from default run)",
+]
 
 [tool.coverage.run]
 source = ["src/liq/scan"]

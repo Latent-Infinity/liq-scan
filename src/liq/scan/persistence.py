@@ -25,11 +25,23 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from liq.scan.exceptions import ScanSchemaError
 from liq.scan.query import ScanResult
 from liq.scan.sweep import SweepConfig
 
 if TYPE_CHECKING:
     from liq.store.parquet import ParquetStore
+
+
+SCHEMA_VERSION = 1
+"""Wire-format version stamped on every sweep artifact.
+
+Bumped only on a breaking change to ``runs`` or ``meta`` shape.
+Readers tolerate the same version or lower (missing column → treated
+as legacy / unstamped); higher versions raise :class:`ScanSchemaError`
+so a forward-compat reader never silently truncates fields it does
+not understand.
+"""
 
 
 def sweep_key_prefix(config: SweepConfig) -> str:
@@ -103,6 +115,7 @@ def runs_schema() -> dict[str, Any]:
         "metric_version": pl.Utf8,
         "split_event": pl.Utf8,
         "universe_hash": pl.Utf8,
+        "schema_version": pl.Int64,
     }
 
 
@@ -128,6 +141,7 @@ def results_to_frame(results: Iterable[ScanResult], *, universe_hash_value: str)
             "metric_version": r.metric_version,
             "split_event": r.split_event or "",
             "universe_hash": universe_hash_value,
+            "schema_version": SCHEMA_VERSION,
         }
         for r in results
     ]
@@ -154,7 +168,55 @@ def load_runs(store: ParquetStore, config: SweepConfig) -> pl.DataFrame:
     key = f"{sweep_key_prefix(config)}/runs"
     if not store.exists(key):
         return pl.DataFrame(schema=runs_schema())
-    return store.read(key)
+    frame = store.read(key)
+    return _check_and_stamp(frame, artifact="runs")
+
+
+def load_meta(store: ParquetStore, config: SweepConfig) -> dict[str, Any]:
+    """Return the meta parquet row after validating its schema version."""
+    key = f"{sweep_key_prefix(config)}/meta"
+    if not store.exists(key):
+        raise ScanSchemaError(
+            f"meta key missing for {config.query_name!r}/{compute_sweep_id(config)}"
+        )
+    frame = store.read(key)
+    stamped = _check_and_stamp(frame, artifact="meta")
+    return stamped.row(0, named=True)
+
+
+def load_meta_json(store: ParquetStore, config: SweepConfig) -> dict[str, Any]:
+    """Return the operator JSON sidecar after validating its schema version."""
+    path = meta_json_path(store, config)
+    if not path.exists():
+        raise ScanSchemaError(
+            f"meta.json missing for {config.query_name!r}/{compute_sweep_id(config)}"
+        )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    version = payload.get("schema_version", SCHEMA_VERSION)
+    if int(version) > SCHEMA_VERSION:
+        raise ScanSchemaError(
+            f"meta.json schema_version={version} exceeds reader version {SCHEMA_VERSION}"
+        )
+    return payload
+
+
+def _check_and_stamp(frame: pl.DataFrame, *, artifact: str) -> pl.DataFrame:
+    """Validate ``schema_version`` and inject it back when missing.
+
+    Forward-compat policy: a stamped artifact with ``schema_version >
+    SCHEMA_VERSION`` raises :class:`ScanSchemaError`. A legacy
+    unstamped artifact is accepted and tagged with the current
+    version on read so consumers see a consistent column.
+    """
+    if "schema_version" not in frame.columns:
+        return frame.with_columns(pl.lit(SCHEMA_VERSION).cast(pl.Int64).alias("schema_version"))
+    versions = frame["schema_version"].drop_nulls().unique().to_list()
+    for v in versions:
+        if int(v) > SCHEMA_VERSION:
+            raise ScanSchemaError(
+                f"{artifact} schema_version={v} exceeds reader version {SCHEMA_VERSION}"
+            )
+    return frame
 
 
 def write_meta(
@@ -175,6 +237,7 @@ def write_meta(
         "interval_minutes": config.interval_minutes or 0,
         "query_hash": query_hash,
         "data_version_hash": data_version_hash or "",
+        "schema_version": SCHEMA_VERSION,
     }
     store.write(
         f"{sweep_key_prefix(config)}/meta",
@@ -271,12 +334,15 @@ def sweep_data_version_hash(store: ParquetStore, config: SweepConfig) -> str:
 
 
 __all__ = [
+    "SCHEMA_VERSION",
     "SweepArtifacts",
     "append_runs",
     "completed_asofs_key",
     "completed_schema",
     "compute_sweep_id",
     "list_persisted_as_ofs",
+    "load_meta",
+    "load_meta_json",
     "load_runs",
     "mark_as_of_complete",
     "meta_json_path",

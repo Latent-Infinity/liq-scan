@@ -23,7 +23,16 @@ SplitHandling = Literal["adjust", "exclude"]
 
 
 class ScanQuery(BaseModel):
-    """Operator-facing query passed to ``ScanEngine.execute``."""
+    """Operator-facing query passed to ``ScanEngine.execute``.
+
+    ``universe_ref`` is the **research scope** — what we study and pull
+    data for. ``tradable_ref`` (optional) is the **execution policy** —
+    what we'd actually act on. Rank + limit run on the research set
+    first; only after that are non-tradable names dropped. This keeps
+    the two concerns separable: changing your broker doesn't change
+    your research universe, and tightening research scope doesn't
+    silently change your trade set.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -36,6 +45,7 @@ class ScanQuery(BaseModel):
     include_extended_hours: bool = False
     metric_version: str = "midrange-endpoint-v1"
     split_handling: SplitHandling = "adjust"
+    tradable_ref: Any | None = None
 
     @field_validator("universe_ref")
     @classmethod
@@ -44,6 +54,17 @@ class ScanQuery(BaseModel):
             raise ValueError("universe_ref string must be non-empty")
         if isinstance(value, list) and not value:
             raise ValueError("universe_ref list must be non-empty")
+        return value
+
+    @field_validator("tradable_ref")
+    @classmethod
+    def _non_empty_tradable(cls, value: Any) -> Any:
+        if value is None:
+            return value
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("tradable_ref string must be non-empty when set")
+        if isinstance(value, list) and not value:
+            raise ValueError("tradable_ref list must be non-empty when set")
         return value
 
     @field_validator("as_of")
@@ -87,6 +108,7 @@ class ScanQueryTemplate(BaseModel):
     include_extended_hours: bool = False
     metric_version: str = "midrange-endpoint-v1"
     split_handling: SplitHandling = "adjust"
+    tradable_ref: Any | None = None
 
     def with_as_of(self, as_of: datetime) -> ScanQuery:
         return ScanQuery(
@@ -99,6 +121,7 @@ class ScanQueryTemplate(BaseModel):
             include_extended_hours=self.include_extended_hours,
             metric_version=self.metric_version,
             split_handling=self.split_handling,
+            tradable_ref=self.tradable_ref,
         )
 
 

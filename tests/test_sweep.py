@@ -223,11 +223,11 @@ class TestResumability:
         call_count = {"n": 0}
         real_execute = eng.execute
 
-        def failing_execute(query):
+        def failing_execute(query, **kwargs):
             call_count["n"] += 1
             if call_count["n"] == 3:
                 raise RuntimeError("boom mid-sweep")
-            return real_execute(query)
+            return real_execute(query, **kwargs)
 
         monkeypatch.setattr(eng, "execute", failing_execute)
         with pytest.raises(RuntimeError):
@@ -257,7 +257,7 @@ class TestResumability:
         _seed(root)
         eng.sweep(_template(), _config())
 
-        def fail_if_called(query):
+        def fail_if_called(query, **kwargs):
             raise AssertionError("execute should not run for a completed sweep")
 
         monkeypatch.setattr(eng, "execute", fail_if_called)

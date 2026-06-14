@@ -92,11 +92,19 @@ class ScanEngine:
 
     # ----- public ---------------------------------------------------
 
-    def execute(self, query: ScanQuery) -> list[ScanResult]:
+    def execute(
+        self,
+        query: ScanQuery,
+        *,
+        correlation_id: str | None = None,
+        sweep_id: str | None = None,
+    ) -> list[ScanResult]:
         scan_run_id = _scan_run_id(query)
         self._log_event(
             "scan_started",
             scan_run_id=scan_run_id,
+            correlation_id=correlation_id,
+            sweep_id=sweep_id,
             as_of=query.as_of.isoformat(),
             include_extended_hours=query.include_extended_hours,
         )
@@ -109,13 +117,27 @@ class ScanEngine:
         self._log_event(
             "universe_resolved",
             scan_run_id=scan_run_id,
+            correlation_id=correlation_id,
+            sweep_id=sweep_id,
             symbols_count=len(symbols),
             pit=bool(getattr(resolved, "pit", False)),
         )
 
         if not symbols:
-            self._log_event("empty_universe", scan_run_id=scan_run_id, level=logging.WARNING)
-            self._log_event("scan_completed", scan_run_id=scan_run_id, result_count=0)
+            self._log_event(
+                "empty_universe",
+                scan_run_id=scan_run_id,
+                correlation_id=correlation_id,
+                sweep_id=sweep_id,
+                level=logging.WARNING,
+            )
+            self._log_event(
+                "scan_completed",
+                scan_run_id=scan_run_id,
+                correlation_id=correlation_id,
+                sweep_id=sweep_id,
+                result_count=0,
+            )
             return []
 
         # Step 2 — window-actual.
@@ -126,6 +148,8 @@ class ScanEngine:
         self._log_event(
             "coverage_verified",
             scan_run_id=scan_run_id,
+            correlation_id=correlation_id,
+            sweep_id=sweep_id,
             missing_count=len(gaps),
             window_start=window_start.isoformat(),
             window_end=window_end.isoformat(),
@@ -147,6 +171,8 @@ class ScanEngine:
         self._log_event(
             "read_multi",
             scan_run_id=scan_run_id,
+            correlation_id=correlation_id,
+            sweep_id=sweep_id,
             keys_count=len(keys),
             missing_count=len(result.missing_keys),
             window_start=window_start.isoformat(),
@@ -163,9 +189,20 @@ class ScanEngine:
         df = result.data
         if df.is_empty():
             self._log_event(
-                "predicate_evaluated", scan_run_id=scan_run_id, evaluated_count=0, passed_count=0
+                "predicate_evaluated",
+                scan_run_id=scan_run_id,
+                correlation_id=correlation_id,
+                sweep_id=sweep_id,
+                evaluated_count=0,
+                passed_count=0,
             )
-            self._log_event("scan_completed", scan_run_id=scan_run_id, result_count=0)
+            self._log_event(
+                "scan_completed",
+                scan_run_id=scan_run_id,
+                correlation_id=correlation_id,
+                sweep_id=sweep_id,
+                result_count=0,
+            )
             return []
 
         # Step 5 — split handling from stored corporate-action rows.
@@ -196,6 +233,8 @@ class ScanEngine:
         self._log_event(
             "predicate_evaluated",
             scan_run_id=scan_run_id,
+            correlation_id=correlation_id,
+            sweep_id=sweep_id,
             evaluated_count=len(per_symbol),
             passed_count=len(passing),
         )
@@ -217,7 +256,39 @@ class ScanEngine:
             )
             for row in ranked
         ]
-        self._log_event("scan_completed", scan_run_id=scan_run_id, result_count=len(results))
+
+        # Tradable-set filter (optional). Runs *after* rank + limit so
+        # the top-K shape is preserved minus the non-tradable rows —
+        # consistent with the "rank on research, gate on execution"
+        # separation in docs/scan-query.md.
+        if query.tradable_ref is not None:
+            tradable = self._data_service.resolve_universe(
+                query.tradable_ref,
+                as_of=query.as_of.date(),
+                registry=self._registry,
+            )
+            tradable_set = {str(s).upper() for s in tradable.symbols}
+            before = len(results)
+            results = [r for r in results if r.symbol.upper() in tradable_set]
+            self._log_event(
+                "tradable_filtered",
+                scan_run_id=scan_run_id,
+                correlation_id=correlation_id,
+                sweep_id=sweep_id,
+                kept=len(results),
+                dropped=before - len(results),
+                tradable_universe=(
+                    query.tradable_ref if isinstance(query.tradable_ref, str) else "<inline-list>"
+                ),
+            )
+
+        self._log_event(
+            "scan_completed",
+            scan_run_id=scan_run_id,
+            correlation_id=correlation_id,
+            sweep_id=sweep_id,
+            result_count=len(results),
+        )
         return results
 
     def sweep(
@@ -253,6 +324,7 @@ class ScanEngine:
             self._log_event(
                 "sweep_resumed",
                 scan_run_id=sweep_run_id,
+                sweep_id=sweep_id,
                 resumed_from=resumed_from.isoformat(),
                 remaining=len(remaining),
             )
@@ -281,17 +353,17 @@ class ScanEngine:
 
             symbols = list(resolved.symbols)
             uni_hash = upsert_universe_snapshot(self._store, config, as_of=as_of, symbols=symbols)
-            self._log_event(
-                "sweep_as_of",
-                scan_run_id=sweep_run_id,
-                as_of=as_of.isoformat(),
-                universe_hash=uni_hash,
-            )
-
-            results = self.execute(query)
+            results = self.execute(query, correlation_id=sweep_run_id, sweep_id=sweep_id)
             frame = results_to_frame(results, universe_hash_value=uni_hash)
             append_runs(self._store, config, frame)
             mark_as_of_complete(self._store, config, as_of)
+            self._log_event(
+                "sweep_as_of",
+                scan_run_id=sweep_run_id,
+                sweep_id=sweep_id,
+                as_of=as_of.isoformat(),
+                universe_hash=uni_hash,
+            )
             runs_count += frame.height
 
         # Re-count total persisted rows so resume counts correctly.
@@ -312,6 +384,7 @@ class ScanEngine:
         self._log_event(
             "sweep_completed",
             scan_run_id=sweep_run_id,
+            sweep_id=sweep_id,
             sessions_scanned=len(as_ofs),
             sessions_with_hits=total_sessions_with_hits,
             runs_count=total_runs,
@@ -337,19 +410,21 @@ class ScanEngine:
         event: str,
         *,
         scan_run_id: str,
+        correlation_id: str | None = None,
         level: int = logging.INFO,
         **fields: object,
     ) -> None:
+        extra = {
+            "event": event,
+            "scan_run_id": scan_run_id,
+            "correlation_id": correlation_id or scan_run_id,
+            "timestamp": datetime.now(tz=UTC).isoformat(),
+            **{k: v for k, v in fields.items() if v is not None},
+        }
         logger.log(
             level,
             event,
-            extra={
-                "event": event,
-                "scan_run_id": scan_run_id,
-                "correlation_id": scan_run_id,
-                "timestamp": datetime.now(tz=UTC).isoformat(),
-                **fields,
-            },
+            extra=extra,
         )
 
     @staticmethod
