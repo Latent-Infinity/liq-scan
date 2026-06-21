@@ -2,12 +2,14 @@
 
 Cross-sectional universe screening for the LIQ Stack.
 
-> **Status:** scaffolding only — package importable, CLI wired, no
-> business logic yet. See
+> **Status:** implementation-ready for generic cross-sectional scanning.
+> `execute` and `sweep` are implemented with predicate evaluation,
+> coverage checks, schema-versioned persistence, and a Typer CLI. See
 > [`../liq-docs/plans/liq-scan-plan.md`](../liq-docs/plans/liq-scan-plan.md)
 > for the delivery plan and
 > [`../liq-docs/requirements/liq-scan-requirements.md`](../liq-docs/requirements/liq-scan-requirements.md)
-> for the requirements spec.
+> for the requirements spec. Product-complete operation still requires
+> an operator-approved production sweep and provider spend gate.
 
 ## What this library does
 
@@ -15,7 +17,7 @@ Cross-sectional universe screening for the LIQ Stack.
 over window W as of time T?"** — across a curated, named universe,
 backed by bars in `liq-store`.
 
-Examples (target shape, not built yet):
+Examples:
 
 - *"Which S&P 500 names moved ±5% over the trailing session as-of
   2024-06-03 close?"*
@@ -41,18 +43,22 @@ libraries; see [the dependency graph](../liq-docs/architecture/liq-stack-spec.md
 
 ## Quickstart
 
-> _The `execute` (single query) and `sweep` (historical) subcommands
-> are planned, not yet implemented. The CLI is wired but currently
-> exposes only `--help`._
-
 ```bash
-# Future shape (not yet implemented):
+# Run a single scan and emit ranked ScanResult rows as JSON.
 liq-scan execute \
   --universe sp500 \
-  --as-of 2024-06-03T20:00:00Z \
+  --as-of 2024-06-03T20:00:00+00:00 \
   --window trading_minutes:390 \
   --threshold 5 \
   --direction either \
+  --output json
+
+# Run a persisted historical sweep from a ScanQueryTemplate YAML file.
+liq-scan sweep \
+  --query queries/mean-reversion.yaml \
+  --start 2024-01-01 \
+  --end 2024-12-31 \
+  --cadence session_close \
   --output json
 ```
 

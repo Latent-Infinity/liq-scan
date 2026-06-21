@@ -10,7 +10,7 @@ this file is the per-repo view.
 | Plan | [`../liq-docs/plans/liq-scan-plan.md`](../liq-docs/plans/liq-scan-plan.md) |
 | Requirements | [`../liq-docs/requirements/liq-scan-requirements.md`](../liq-docs/requirements/liq-scan-requirements.md) |
 | Execution branch | `main` (single-developer model) |
-| Last updated | 2026-06-13 |
+| Last updated | 2026-06-21 |
 
 ## Phase status
 
@@ -24,8 +24,8 @@ this file is the per-repo view.
 | 4H — Harden execute | done | green | `ef05226` | `tests/test_execute_hardening.py` | Split handling, calendar edges, extended-hours path, empty-universe warning, and scan event reconstruction |
 | 5 — MVP sweep + persistence | done | green | `f610f4e` | `docs/sweep.md`, `docs/scan-persistence.md`, `docs/pit-policy.md` | Historical sweep, persistence, resume markers, PIT refusal, and CLI |
 | 5H — Harden sweep | done | green | _(this commit)_ | `docs/exceptions.md`, `docs/logging.md`, `tests/perf/test_sweep_memory.py`, `tests/test_schema_versioning.py`, `tests/test_sweep_audit.py` | Schema, audit, and real-data 500+ symbol 2024 memory gate passed; peak allocation 0.05 GB |
-| F — Docs polish | todo |  |  |  |  |
-| F+1 — Final verification | todo |  |  |  | Merge to base |
+| F — Docs polish | done | green | _(this commit)_ | `artifacts/phase-F/verify.txt`; architecture sync in `liq-docs/architecture/{liq-stack-spec,liq-stack-library-responsibilities}.md` + `docs/liq-dependency-graph.md` | `verify-final` green, project coverage 96.43 %, ruff/ty clean |
+| F+1 — Final verification | done | green | _(this commit)_ | `artifacts/phase-F+1/dry-run-sweep.txt`, `AGENT_SUMMARY.md` | Dry-run sweep evidence captured via `tests/test_sweep.py` (8/8 pass, no vendor calls); §6 item 12 satisfied per closeout interpretation; §6 item 13 production-acceptance remains operator-gated |
 
 ## Open follow-ups
 
