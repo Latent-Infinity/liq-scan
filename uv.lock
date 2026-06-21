@@ -760,6 +760,7 @@ requires-dist = [
     { name = "liq-data", editable = "../liq-data" },
     { name = "liq-store", editable = "../liq-store" },
     { name = "liq-ta", editable = "../liq-ta/crates/liq-ta-python" },
+    { name = "liq-validation", marker = "extra == 'dev'", editable = "../liq-validation" },
     { name = "mrmr-selection", marker = "extra == 'all'", specifier = ">=0.2.8" },
     { name = "mrmr-selection", marker = "extra == 'selection'", specifier = ">=0.2.8" },
     { name = "numpy", specifier = ">=2.0" },
@@ -807,6 +808,15 @@ features = [
     { name = "liq-features" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "hypothesis" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+    { name = "ty" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.120" },
@@ -827,6 +837,15 @@ requires-dist = [
     { name = "typer", specifier = ">=0.15" },
 ]
 provides-extras = ["features", "dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "hypothesis", specifier = ">=6.120" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-cov", specifier = ">=6.0" },
+    { name = "ruff", specifier = ">=0.14" },
+    { name = "ty", specifier = ">=0.0.1" },
+]
 
 [[package]]
 name = "liq-store"

@@ -54,6 +54,15 @@ dev = [
     "ty>=0.0.1",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "hypothesis>=6.120",
+    "ruff>=0.14",
+    "ty>=0.0.1",
+]
+
 [project.scripts]
 liq-scan = "liq.scan.cli:main"
 
