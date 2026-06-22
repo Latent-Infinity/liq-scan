@@ -27,3 +27,15 @@ def test_mean_reversion_excursion_predicate_contract_imports() -> None:
     predicate_exports = vars(import_module("liq.scan.predicates"))
 
     assert predicate_exports["MeanReversionExcursionPredicate"] is not None
+
+
+def test_mean_reversion_regime_predicate_contract_imports() -> None:
+    module_exports = vars(import_module("liq.scan.anchors.mean_reversion.regime"))
+
+    assert module_exports["RegimePredicate"] is not None
+
+
+def test_mean_reversion_pit_assertion_contract_imports() -> None:
+    module_exports = vars(import_module("liq.scan.anchors.mean_reversion.assertions"))
+
+    assert callable(module_exports["assert_anchor_pit"])
