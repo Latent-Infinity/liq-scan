@@ -83,3 +83,30 @@ def test_assert_anchor_pit_rejects_late_availability() -> None:
 
     with pytest.raises(LeakageViolation, match="availability_ts"):
         assert_anchor_pit(anchor, bars, {"vol_t": [0, 1, 2], "midrange_base": [0, 1, 2]})
+
+
+def test_assert_anchor_pit_accepts_tuple_range_reference() -> None:
+    bars = _bars()
+    anchor = _anchor(bars["timestamp"][3])
+
+    # Tuple-of-(start, stop) is the half-open range form.
+    assert_anchor_pit(anchor, bars, {"vol_t": (0, 3), "midrange_base": (0, 3)})
+
+
+def test_assert_anchor_pit_rejects_when_anchor_ts_not_found() -> None:
+    bars = _bars()
+    # Build an anchor whose timestamp is not in the bar series.
+    missing_ts = datetime(2099, 1, 1, tzinfo=UTC)
+    anchor = _anchor(missing_ts)
+
+    with pytest.raises(LeakageViolation, match="anchor_ts not found"):
+        assert_anchor_pit(anchor, bars, {"vol_t": [0, 1, 2]})
+
+
+def test_assert_anchor_pit_accepts_mapping_bar_input() -> None:
+    bars = _bars()
+    timestamps = bars["timestamp"].to_list()
+    anchor = _anchor(timestamps[3])
+
+    # Mapping[str, Sequence[datetime]] is the alternative bar input shape.
+    assert_anchor_pit(anchor, {"timestamp": timestamps}, {"vol_t": [0, 1, 2]})
