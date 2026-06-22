@@ -27,6 +27,12 @@ this file is the per-repo view.
 | F — Docs polish | done | green | _(this commit)_ | `artifacts/phase-F/verify.txt`; architecture sync in `liq-docs/architecture/{liq-stack-spec,liq-stack-library-responsibilities}.md` + `docs/liq-dependency-graph.md` | `verify-final` green, project coverage 96.43 %, ruff/ty clean |
 | F+1 — Final verification | done | green | _(this commit)_ | `artifacts/phase-F+1/dry-run-sweep.txt`, `AGENT_SUMMARY.md` | Dry-run sweep evidence captured via `tests/test_sweep.py` (8/8 pass, no vendor calls); §6 item 12 satisfied per closeout interpretation; §6 item 13 production-acceptance remains operator-gated |
 
+## Plan: `mean-reversion-swing-scan-impl-plan` (v0.3)
+
+| Work package | Capability | Status | Evidence |
+| --- | --- | --- | --- |
+| F0 | Mean-reversion anchor namespace under construction; anchor event, anchor extension, and excursion predicate import contracts pinned by strict xfail tests | ready-for-review | `src/liq/scan/anchors/mean_reversion/__init__.py`; `tests/test_mean_reversion_anchor_contract_imports.py` |
+
 ## Open follow-ups
 
 _None._
