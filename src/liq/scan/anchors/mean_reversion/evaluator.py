@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -21,6 +22,8 @@ from liq.scan.predicates import (
     MeanReversionPredicateInput,
     RegimePredicate,
 )
+
+_LOGGER = logging.getLogger("liq.scan.anchors.mean_reversion")
 
 
 def _high_low(
@@ -132,7 +135,18 @@ class AnchorEvaluator(BaseModel):
                 anchor_ts=anchor_ts,
                 quality_flags=flags,
             )
-            if not self.predicate.evaluate(row):
+            if not excursion_predicate.evaluate(row):
+                continue
+            if regime_predicate is not None and not regime_predicate.evaluate(row):
+                _LOGGER.info(
+                    "anchor_suppressed_by_regime",
+                    extra={
+                        "symbol": symbol,
+                        "anchor_ts": anchor_ts.isoformat(),
+                        "bar_index": index,
+                        "regime_label": regime_predicate.label_at(index),
+                    },
+                )
                 continue
             regime_at_anchor = (
                 regime_predicate.label_at(index) if regime_predicate is not None else None

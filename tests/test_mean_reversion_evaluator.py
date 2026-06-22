@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Literal, get_args
 
 import polars as pl
+import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from liq.scan.anchors.mean_reversion import AnchorEvaluator
 from liq.scan.anchors.mean_reversion.regime import RegimePredicate
-from liq.scan.predicates import AndPredicate, MeanReversionExcursionPredicate
+from liq.scan.predicates import AndPredicate, MeanReversionExcursionPredicate, RegimeLabel
+
+_REGIME_LABELS: tuple[RegimeLabel, ...] = get_args(Literal["trend", "chop", "indeterminate"])
 
 
 def _bars() -> pl.DataFrame:
@@ -79,6 +85,92 @@ def test_evaluator_drops_bars_with_non_datetime_timestamp() -> None:
 def test_evaluator_skips_when_predicate_rejects() -> None:
     # K=10 is above the realized excursion of 3.0 — predicate rejects every candidate.
     assert _evaluator(k=10.0).evaluate_symbol("SPY", _bars()) == []
+
+
+def _evaluator_with_regime(
+    labels: tuple[RegimeLabel, ...], adverse: tuple[RegimeLabel, ...]
+) -> AnchorEvaluator:
+    return AnchorEvaluator(
+        predicate=AndPredicate(
+            predicates=[
+                MeanReversionExcursionPredicate(
+                    K=2.0,
+                    L_vol=3,
+                    L_base=3,
+                    base_kind="roll_mean",
+                    direction="up",
+                    metric_version="midrange-excursion-v1",
+                ),
+                RegimePredicate(labels=labels, adverse_labels=adverse),
+            ]
+        ),
+        scan_run_id="run-1",
+        scan_query_version="query-v1",
+        metric_version="midrange-excursion-v1",
+        resolved_universe_version="universe-v1",
+    )
+
+
+@given(
+    labels=st.tuples(
+        st.sampled_from(_REGIME_LABELS),
+        st.sampled_from(_REGIME_LABELS),
+        st.sampled_from(_REGIME_LABELS),
+        st.sampled_from(_REGIME_LABELS),
+    ),
+    adverse_set=st.sets(st.sampled_from(_REGIME_LABELS), min_size=0, max_size=3),
+)
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=50)
+def test_regime_gate_count_is_bounded_by_ungated_count(
+    labels: tuple[RegimeLabel, RegimeLabel, RegimeLabel, RegimeLabel],
+    adverse_set: set[RegimeLabel],
+) -> None:
+    """For any label series and adverse-label set, regime gating cannot
+    increase the number of anchors emitted by the ungated evaluator.
+    """
+    adverse = tuple(sorted(adverse_set))
+    ungated_count = len(_evaluator().evaluate_symbol("SPY", _bars()))
+    gated_count = len(_evaluator_with_regime(labels, adverse).evaluate_symbol("SPY", _bars()))
+
+    assert gated_count <= ungated_count
+    surviving_label = labels[3]  # only bar index 3 fires in the fixture
+    if surviving_label in adverse and ungated_count > 0:
+        assert gated_count == 0
+    else:
+        assert gated_count == ungated_count
+
+
+def test_regime_predicate_suppresses_adverse_anchor_emits_log_event(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("INFO", logger="liq.scan.anchors.mean_reversion")
+    AnchorEvaluator(
+        predicate=AndPredicate(
+            predicates=[
+                MeanReversionExcursionPredicate(
+                    K=2.0,
+                    L_vol=3,
+                    L_base=3,
+                    base_kind="roll_mean",
+                    direction="up",
+                    metric_version="midrange-excursion-v1",
+                ),
+                RegimePredicate(
+                    labels=("chop", "chop", "chop", "trend"), adverse_labels=("trend",)
+                ),
+            ]
+        ),
+        scan_run_id="run-1",
+        scan_query_version="query-v1",
+        metric_version="midrange-excursion-v1",
+        resolved_universe_version="universe-v1",
+    ).evaluate_symbol("SPY", _bars())
+
+    suppressions = [r for r in caplog.records if r.message == "anchor_suppressed_by_regime"]
+    assert len(suppressions) == 1
+    assert suppressions[0].symbol == "SPY"
+    assert suppressions[0].bar_index == 3
+    assert suppressions[0].regime_label == "trend"
 
 
 def test_regime_predicate_suppresses_adverse_anchor() -> None:
