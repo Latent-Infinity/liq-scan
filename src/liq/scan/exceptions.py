@@ -48,6 +48,10 @@ class NonPITUniverseError(LiqScanError):
     """
 
 
+class LeakageViolation(LiqScanError):
+    """A scanner artifact referenced information unavailable at its anchor."""
+
+
 class ScanSchemaError(LiqScanError):
     """Persisted scan-run was written by a newer/unknown schema version."""
 
@@ -58,6 +62,7 @@ class ScanPersistenceError(LiqScanError):
 
 __all__ = [
     "CoverageGapError",
+    "LeakageViolation",
     "LiqScanError",
     "NonPITUniverseError",
     "ScanPersistenceError",
