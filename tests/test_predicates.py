@@ -7,6 +7,7 @@ appear in the ranked output.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -20,7 +21,25 @@ from liq.scan.predicates import (
     MovePredicate,
     PredicateInput,
     PricePredicate,
+    RegimePredicate,
 )
+
+
+def _mrpi(*, bar_index: int = 0, excursion_units: float = 0.0) -> MeanReversionPredicateInput:
+    return MeanReversionPredicateInput(
+        symbol="X",
+        move_pct=0.0,
+        dollar_volume=Decimal("0"),
+        price=Decimal("100"),
+        bar_count=100,
+        midrange_now=Decimal("100"),
+        midrange_base=Decimal("100"),
+        excursion_units=Decimal(str(excursion_units)),
+        vol_t=Decimal("1"),
+        bar_index=bar_index,
+        anchor_ts=datetime(2024, 6, 3, tzinfo=UTC),
+        quality_flags=(),
+    )
 
 
 def _row(
@@ -170,3 +189,62 @@ class TestAndPredicate:
             ]
         )
         assert not p.evaluate(_row(move_pct=1.0, dollar_volume=10**12))
+
+
+class TestMeanReversionExcursionPredicateRejectsNonMRPI:
+    """The mean-reversion predicate must hard-reject base PredicateInput rows
+    (no excursion_units precomputed) — defends the fact/opinion boundary by
+    refusing to silently pass."""
+
+    def test_returns_false_for_base_predicate_input(self) -> None:
+        predicate = MeanReversionExcursionPredicate(
+            K=1.0,
+            L_vol=3,
+            L_base=3,
+            base_kind="roll_mean",
+            direction="up",
+            metric_version="midrange-excursion-v1",
+        )
+        assert predicate.evaluate(_row(move_pct=0.0)) is False
+
+    def test_down_direction_branch_on_negative_excursion(self) -> None:
+        predicate = MeanReversionExcursionPredicate(
+            K=1.0,
+            L_vol=3,
+            L_base=3,
+            base_kind="roll_mean",
+            direction="down",
+            metric_version="midrange-excursion-v1",
+        )
+        assert predicate.evaluate(_mrpi(excursion_units=-2.0)) is True
+        assert predicate.evaluate(_mrpi(excursion_units=-0.5)) is False
+
+
+class TestRegimePredicate:
+    """Caller-supplied regime gate."""
+
+    def test_returns_false_for_base_predicate_input(self) -> None:
+        """RegimePredicate refuses to evaluate against a plain PredicateInput
+        — no bar_index in the row means the regime gate cannot decide."""
+        predicate = RegimePredicate(labels=("trend", "chop"), adverse_labels=("trend",))
+        assert predicate.evaluate(_row()) is False
+
+    def test_returns_false_when_bar_index_out_of_range(self) -> None:
+        predicate = RegimePredicate(labels=("trend", "chop"), adverse_labels=("trend",))
+        assert predicate.evaluate(_mrpi(bar_index=5)) is False
+
+    def test_passes_when_label_not_adverse(self) -> None:
+        predicate = RegimePredicate(labels=("trend", "chop"), adverse_labels=("trend",))
+        assert predicate.evaluate(_mrpi(bar_index=1)) is True
+
+    def test_suppresses_when_label_adverse(self) -> None:
+        predicate = RegimePredicate(labels=("trend", "chop"), adverse_labels=("trend",))
+        assert predicate.evaluate(_mrpi(bar_index=0)) is False
+
+    def test_label_at_returns_none_for_out_of_range(self) -> None:
+        predicate = RegimePredicate(labels=("trend", "chop"), adverse_labels=())
+        assert predicate.label_at(5) is None
+
+    def test_label_at_returns_indexed_label(self) -> None:
+        predicate = RegimePredicate(labels=("trend", "chop"), adverse_labels=())
+        assert predicate.label_at(1) == "chop"
