@@ -20,11 +20,13 @@ import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from liq.scan.anchors.mean_reversion import AnchorVolSource, MeanReversionAnchor, RegimeLabel
 from liq.scan.exceptions import ScanSchemaError
 from liq.scan.query import ScanResult
 from liq.scan.sweep import SweepConfig
@@ -42,6 +44,9 @@ as legacy / unstamped); higher versions raise :class:`ScanSchemaError`
 so a forward-compat reader never silently truncates fields it does
 not understand.
 """
+
+MEAN_REVERSION_ANCHOR_SCHEMA_VERSION = 2
+"""Wire-format version for mean-reversion anchor tables."""
 
 
 def sweep_key_prefix(config: SweepConfig) -> str:
@@ -150,6 +155,145 @@ def results_to_frame(results: Iterable[ScanResult], *, universe_hash_value: str)
     return pl.DataFrame(rows, schema=runs_schema())
 
 
+def mean_reversion_anchor_schema() -> dict[str, Any]:
+    return {
+        "timestamp": pl.Datetime("us", "UTC"),
+        "symbol": pl.Utf8,
+        "anchor_ts": pl.Datetime("us", "UTC"),
+        "direction": pl.Utf8,
+        "anchor_event_id": pl.Utf8,
+        "scan_run_id": pl.Utf8,
+        "scan_query_version": pl.Utf8,
+        "metric_version": pl.Utf8,
+        "resolved_universe_version": pl.Utf8,
+        "quality_flags": pl.Utf8,
+        "excursion_units": pl.Utf8,
+        "midrange_now": pl.Utf8,
+        "midrange_base": pl.Utf8,
+        "reversion_target": pl.Utf8,
+        "vol_t": pl.Utf8,
+        "anchor_vol_source": pl.Utf8,
+        "regime_at_anchor": pl.Utf8,
+        "schema_version": pl.Int64,
+    }
+
+
+def mean_reversion_anchors_to_frame(anchors: Iterable[MeanReversionAnchor]) -> pl.DataFrame:
+    rows = []
+    for anchor in anchors:
+        rows.append(
+            {
+                "timestamp": anchor.anchor_ts,
+                "symbol": anchor.symbol,
+                "anchor_ts": anchor.anchor_ts,
+                "direction": anchor.direction,
+                "anchor_event_id": anchor.anchor_event_id,
+                "scan_run_id": anchor.scan_run_id,
+                "scan_query_version": anchor.scan_query_version,
+                "metric_version": anchor.metric_version,
+                "resolved_universe_version": anchor.resolved_universe_version,
+                "quality_flags": json.dumps(list(anchor.quality_flags), sort_keys=True),
+                "excursion_units": str(anchor.excursion_units),
+                "midrange_now": str(anchor.midrange_now),
+                "midrange_base": str(anchor.midrange_base),
+                "reversion_target": str(anchor.reversion_target),
+                "vol_t": str(anchor.vol_t),
+                "anchor_vol_source": anchor.anchor_vol_source.model_dump_json(),
+                "regime_at_anchor": anchor.regime_at_anchor or "",
+                "schema_version": MEAN_REVERSION_ANCHOR_SCHEMA_VERSION,
+            }
+        )
+    if not rows:
+        return pl.DataFrame(schema=mean_reversion_anchor_schema())
+    return pl.DataFrame(rows, schema=mean_reversion_anchor_schema())
+
+
+def _regime_label(value: object) -> RegimeLabel | None:
+    if value == "trend":
+        return "trend"
+    if value == "chop":
+        return "chop"
+    if value == "indeterminate":
+        return "indeterminate"
+    return None
+
+
+def frame_to_mean_reversion_anchors(frame: pl.DataFrame) -> list[MeanReversionAnchor]:
+    stamped = _check_and_stamp(
+        frame,
+        artifact="mean_reversion_anchors",
+        reader_version=MEAN_REVERSION_ANCHOR_SCHEMA_VERSION,
+    )
+    anchors: list[MeanReversionAnchor] = []
+    for row in stamped.iter_rows(named=True):
+        flags_raw = row.get("quality_flags") or "[]"
+        source_raw = row.get("anchor_vol_source") or "{}"
+        anchors.append(
+            MeanReversionAnchor(
+                symbol=str(row["symbol"]),
+                anchor_ts=row["anchor_ts"],
+                direction=row["direction"],
+                anchor_event_id=str(row["anchor_event_id"]),
+                scan_run_id=str(row["scan_run_id"]),
+                scan_query_version=str(row["scan_query_version"]),
+                metric_version=str(row["metric_version"]),
+                resolved_universe_version=str(row["resolved_universe_version"]),
+                quality_flags=tuple(str(flag) for flag in json.loads(str(flags_raw))),
+                excursion_units=Decimal(str(row["excursion_units"])),
+                midrange_now=Decimal(str(row["midrange_now"])),
+                midrange_base=Decimal(str(row["midrange_base"])),
+                reversion_target=Decimal(str(row["reversion_target"])),
+                vol_t=Decimal(str(row["vol_t"])),
+                anchor_vol_source=AnchorVolSource.model_validate_json(str(source_raw)),
+                regime_at_anchor=_regime_label(row["regime_at_anchor"]),
+            )
+        )
+    return anchors
+
+
+def write_schema_manifest(
+    path: Path,
+    *,
+    schema_version: int,
+    table_name: str,
+    fields: Sequence[str],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": schema_version,
+        "table_name": table_name,
+        "fields": list(fields),
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def write_mean_reversion_anchors(
+    anchors: Iterable[MeanReversionAnchor],
+    *,
+    store: ParquetStore,
+    table_name: str = "scans/mean_reversion/anchors",
+) -> str:
+    frame = mean_reversion_anchors_to_frame(anchors)
+    store.write(table_name, frame, mode="overwrite")
+    write_schema_manifest(
+        store.data_root / table_name / "meta.json",
+        schema_version=MEAN_REVERSION_ANCHOR_SCHEMA_VERSION,
+        table_name="mean_reversion_anchors",
+        fields=list(mean_reversion_anchor_schema()),
+    )
+    return table_name
+
+
+def read_mean_reversion_anchors(
+    *,
+    store: ParquetStore,
+    table_name: str = "scans/mean_reversion/anchors",
+) -> list[MeanReversionAnchor]:
+    if not store.exists(table_name):
+        return []
+    return frame_to_mean_reversion_anchors(store.read(table_name))
+
+
 def append_runs(store: ParquetStore, config: SweepConfig, frame: pl.DataFrame) -> None:
     """Idempotent append: dedupe on ``(as_of, symbol)`` so a resume
     that re-emits a session collapses to one row."""
@@ -200,7 +344,12 @@ def load_meta_json(store: ParquetStore, config: SweepConfig) -> dict[str, Any]:
     return payload
 
 
-def _check_and_stamp(frame: pl.DataFrame, *, artifact: str) -> pl.DataFrame:
+def _check_and_stamp(
+    frame: pl.DataFrame,
+    *,
+    artifact: str,
+    reader_version: int = SCHEMA_VERSION,
+) -> pl.DataFrame:
     """Validate ``schema_version`` and inject it back when missing.
 
     Forward-compat policy: a stamped artifact with ``schema_version >
@@ -209,12 +358,12 @@ def _check_and_stamp(frame: pl.DataFrame, *, artifact: str) -> pl.DataFrame:
     version on read so consumers see a consistent column.
     """
     if "schema_version" not in frame.columns:
-        return frame.with_columns(pl.lit(SCHEMA_VERSION).cast(pl.Int64).alias("schema_version"))
+        return frame.with_columns(pl.lit(reader_version).cast(pl.Int64).alias("schema_version"))
     versions = frame["schema_version"].drop_nulls().unique().to_list()
     for v in versions:
-        if int(v) > SCHEMA_VERSION:
+        if int(v) > reader_version:
             raise ScanSchemaError(
-                f"{artifact} schema_version={v} exceeds reader version {SCHEMA_VERSION}"
+                f"{artifact} schema_version={v} exceeds reader version {reader_version}"
             )
     return frame
 
@@ -334,6 +483,7 @@ def sweep_data_version_hash(store: ParquetStore, config: SweepConfig) -> str:
 
 
 __all__ = [
+    "MEAN_REVERSION_ANCHOR_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "SweepArtifacts",
     "append_runs",
@@ -342,15 +492,21 @@ __all__ = [
     "compute_sweep_id",
     "list_persisted_as_ofs",
     "load_meta",
+    "frame_to_mean_reversion_anchors",
     "load_meta_json",
     "load_runs",
+    "mean_reversion_anchor_schema",
+    "mean_reversion_anchors_to_frame",
     "mark_as_of_complete",
     "meta_json_path",
+    "read_mean_reversion_anchors",
     "results_to_frame",
     "runs_schema",
     "sweep_data_version_hash",
     "sweep_key_prefix",
     "universe_hash",
     "upsert_universe_snapshot",
+    "write_mean_reversion_anchors",
     "write_meta",
+    "write_schema_manifest",
 ]
