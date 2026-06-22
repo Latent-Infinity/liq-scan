@@ -5,7 +5,8 @@ from datetime import UTC, datetime, timedelta
 import polars as pl
 
 from liq.scan.anchors.mean_reversion import AnchorEvaluator
-from liq.scan.predicates import MeanReversionExcursionPredicate
+from liq.scan.anchors.mean_reversion.regime import RegimePredicate
+from liq.scan.predicates import AndPredicate, MeanReversionExcursionPredicate
 
 
 def _bars() -> pl.DataFrame:
@@ -78,3 +79,56 @@ def test_evaluator_drops_bars_with_non_datetime_timestamp() -> None:
 def test_evaluator_skips_when_predicate_rejects() -> None:
     # K=10 is above the realized excursion of 3.0 — predicate rejects every candidate.
     assert _evaluator(k=10.0).evaluate_symbol("SPY", _bars()) == []
+
+
+def test_regime_predicate_suppresses_adverse_anchor() -> None:
+    ungated = _evaluator().evaluate_symbol("SPY", _bars())
+    gated = AnchorEvaluator(
+        predicate=AndPredicate(
+            predicates=[
+                MeanReversionExcursionPredicate(
+                    K=2.0,
+                    L_vol=3,
+                    L_base=3,
+                    base_kind="roll_mean",
+                    direction="up",
+                    metric_version="midrange-excursion-v1",
+                ),
+                RegimePredicate(
+                    labels=("chop", "chop", "chop", "trend"), adverse_labels=("trend",)
+                ),
+            ]
+        ),
+        scan_run_id="run-1",
+        scan_query_version="query-v1",
+        metric_version="midrange-excursion-v1",
+        resolved_universe_version="universe-v1",
+    ).evaluate_symbol("SPY", _bars())
+
+    assert len(ungated) == 1
+    assert gated == []
+
+
+def test_regime_at_anchor_passes_through_permissive_label() -> None:
+    anchors = AnchorEvaluator(
+        predicate=AndPredicate(
+            predicates=[
+                MeanReversionExcursionPredicate(
+                    K=2.0,
+                    L_vol=3,
+                    L_base=3,
+                    base_kind="roll_mean",
+                    direction="up",
+                    metric_version="midrange-excursion-v1",
+                ),
+                RegimePredicate(labels=("trend", "trend", "trend", "chop"), adverse_labels=()),
+            ]
+        ),
+        scan_run_id="run-1",
+        scan_query_version="query-v1",
+        metric_version="midrange-excursion-v1",
+        resolved_universe_version="universe-v1",
+    ).evaluate_symbol("SPY", _bars())
+
+    assert len(anchors) == 1
+    assert anchors[0].regime_at_anchor == "chop"

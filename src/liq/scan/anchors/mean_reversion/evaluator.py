@@ -15,7 +15,12 @@ from liq.scan.anchors.mean_reversion.models import (
     MeanReversionAnchor,
     compute_anchor_event_id,
 )
-from liq.scan.predicates import MeanReversionExcursionPredicate, MeanReversionPredicateInput
+from liq.scan.predicates import (
+    AndPredicate,
+    MeanReversionExcursionPredicate,
+    MeanReversionPredicateInput,
+    RegimePredicate,
+)
 
 
 def _high_low(
@@ -78,7 +83,7 @@ class AnchorEvaluator(BaseModel):
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
-    predicate: MeanReversionExcursionPredicate
+    predicate: MeanReversionExcursionPredicate | AndPredicate
     scan_run_id: str
     scan_query_version: str
     metric_version: str
@@ -93,8 +98,10 @@ class AnchorEvaluator(BaseModel):
             (float(h) + float(lo)) / 2.0
             for h, lo in zip(ordered["high"].to_list(), ordered["low"].to_list(), strict=True)
         ]
-        base_series = self._base_series(ordered)
-        vol_series = _trailing_range_vol(ordered, self.predicate.L_vol)
+        excursion_predicate = self._excursion_predicate()
+        regime_predicate = self._regime_predicate()
+        base_series = self._base_series(ordered, excursion_predicate)
+        vol_series = _trailing_range_vol(ordered, excursion_predicate.L_vol)
         anchors: list[MeanReversionAnchor] = []
         timestamps = ordered["timestamp"].to_list()
         for index in range(ordered.height):
@@ -127,6 +134,9 @@ class AnchorEvaluator(BaseModel):
             )
             if not self.predicate.evaluate(row):
                 continue
+            regime_at_anchor = (
+                regime_predicate.label_at(index) if regime_predicate is not None else None
+            )
             anchor_id = compute_anchor_event_id(
                 self.scan_run_id,
                 symbol,
@@ -152,19 +162,41 @@ class AnchorEvaluator(BaseModel):
                     vol_t=Decimal(str(vol_t)),
                     anchor_vol_source=AnchorVolSource(
                         estimator="range_mean",
-                        lookback=self.predicate.L_vol,
-                        min_periods=self.predicate.L_vol,
+                        lookback=excursion_predicate.L_vol,
+                        min_periods=excursion_predicate.L_vol,
                         calendar_policy=self.calendar_policy,
                         availability_ts=anchor_ts,
                     ),
+                    regime_at_anchor=regime_at_anchor,
                 )
             )
         return anchors
 
-    def _base_series(self, bars: pl.DataFrame) -> list[float]:
-        if self.predicate.base_kind == "roll_extreme":
-            return _roll_extreme_midrange(bars, self.predicate.L_base)
-        return _roll_mean_midrange(bars, self.predicate.L_base)
+    def _base_series(
+        self,
+        bars: pl.DataFrame,
+        predicate: MeanReversionExcursionPredicate,
+    ) -> list[float]:
+        if predicate.base_kind == "roll_extreme":
+            return _roll_extreme_midrange(bars, predicate.L_base)
+        return _roll_mean_midrange(bars, predicate.L_base)
+
+    def _excursion_predicate(self) -> MeanReversionExcursionPredicate:
+        if isinstance(self.predicate, MeanReversionExcursionPredicate):
+            return self.predicate
+        for child in self.predicate.predicates:
+            if isinstance(child, MeanReversionExcursionPredicate):
+                return child
+        raise ValueError("AnchorEvaluator requires MeanReversionExcursionPredicate")
+
+    def _regime_predicate(self) -> RegimePredicate | None:
+        if isinstance(self.predicate, RegimePredicate):
+            return self.predicate
+        if isinstance(self.predicate, AndPredicate):
+            for child in self.predicate.predicates:
+                if isinstance(child, RegimePredicate):
+                    return child
+        return None
 
     @staticmethod
     def _quality_flags(*, base: float, vol_t: float) -> tuple[str, ...]:
