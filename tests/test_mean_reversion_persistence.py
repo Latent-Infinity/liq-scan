@@ -58,3 +58,5 @@ def test_mean_reversion_anchor_round_trip_writes_schema_manifest(tmp_path) -> No
     assert payload["schema_version"] == MEAN_REVERSION_ANCHOR_SCHEMA_VERSION
     assert payload["table_name"] == "mean_reversion_anchors"
     assert "anchor_event_id" in payload["fields"]
+    assert payload["field_types"]["anchor_event_id"] == "String"
+    assert payload["field_types"]["anchor_ts"] == "Datetime(time_unit='us', time_zone='UTC')"

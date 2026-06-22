@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -257,12 +257,14 @@ def write_schema_manifest(
     schema_version: int,
     table_name: str,
     fields: Sequence[str],
+    field_types: Mapping[str, object] | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": schema_version,
         "table_name": table_name,
         "fields": list(fields),
+        "field_types": {name: str(dtype) for name, dtype in sorted((field_types or {}).items())},
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -275,11 +277,13 @@ def write_mean_reversion_anchors(
 ) -> str:
     frame = mean_reversion_anchors_to_frame(anchors)
     store.write(table_name, frame, mode="overwrite")
+    schema = mean_reversion_anchor_schema()
     write_schema_manifest(
         store.data_root / table_name / "meta.json",
         schema_version=MEAN_REVERSION_ANCHOR_SCHEMA_VERSION,
         table_name="mean_reversion_anchors",
-        fields=list(mean_reversion_anchor_schema()),
+        fields=list(schema),
+        field_types=schema,
     )
     return table_name
 
