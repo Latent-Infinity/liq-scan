@@ -43,6 +43,7 @@ class MeanReversionPredicateInput(PredicateInput):
 
 
 Direction = Literal["up", "down", "either"]
+RegimeLabel = Literal["trend", "chop", "indeterminate"]
 
 
 class _BasePredicate(BaseModel):
@@ -111,6 +112,25 @@ class MeanReversionExcursionPredicate(_BasePredicate):
         return abs(units) >= self.K
 
 
+class RegimePredicate(_BasePredicate):
+    """Pass when a caller-supplied regime label is not adverse."""
+
+    labels: tuple[RegimeLabel, ...]
+    adverse_labels: tuple[RegimeLabel, ...] = ("trend",)
+
+    def evaluate(self, row: PredicateInput) -> bool:
+        if not isinstance(row, MeanReversionPredicateInput):
+            return False
+        if row.bar_index >= len(self.labels):
+            return False
+        return self.labels[row.bar_index] not in self.adverse_labels
+
+    def label_at(self, bar_index: int) -> RegimeLabel | None:
+        if bar_index >= len(self.labels):
+            return None
+        return self.labels[bar_index]
+
+
 class AndPredicate(_BasePredicate):
     """Logical AND across a list of child predicates.
 
@@ -129,6 +149,7 @@ AnyPredicate = (
     | DollarVolumePredicate
     | PricePredicate
     | MeanReversionExcursionPredicate
+    | RegimePredicate
     | AndPredicate
 )
 """Union of every concrete predicate. Used as the field type on ``ScanQuery``."""
@@ -147,4 +168,6 @@ __all__ = [
     "MovePredicate",
     "PredicateInput",
     "PricePredicate",
+    "RegimeLabel",
+    "RegimePredicate",
 ]
