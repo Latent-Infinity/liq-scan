@@ -28,6 +28,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 import polars as pl
 
+from liq.scan.anchors.mean_reversion import AnchorEvaluator, MeanReversionAnchor
 from liq.scan.exceptions import CoverageGapError, NonPITUniverseError
 from liq.scan.persistence import (
     SweepArtifacts,
@@ -38,10 +39,11 @@ from liq.scan.persistence import (
     mark_as_of_complete,
     results_to_frame,
     sweep_data_version_hash,
+    universe_hash,
     upsert_universe_snapshot,
     write_meta,
 )
-from liq.scan.predicates import PredicateInput
+from liq.scan.predicates import MeanReversionExcursionPredicate, PredicateInput
 from liq.scan.query import ScanQuery, ScanQueryTemplate, ScanResult
 from liq.scan.sweep import SweepConfig, as_of_timestamps, filter_remaining
 from liq.scan.window import TradingMinutesWindow
@@ -290,6 +292,90 @@ class ScanEngine:
             result_count=len(results),
         )
         return results
+
+    def execute_mean_reversion(
+        self,
+        query: ScanQuery,
+        *,
+        correlation_id: str | None = None,
+        sweep_id: str | None = None,
+    ) -> list[MeanReversionAnchor]:
+        """Run the dedicated mean-reversion anchor evaluator."""
+        if not isinstance(query.predicate, MeanReversionExcursionPredicate):
+            raise ValueError("execute_mean_reversion requires MeanReversionExcursionPredicate")
+
+        scan_run_id = _scan_run_id(query)
+        resolved = self._data_service.resolve_universe(
+            query.universe_ref,
+            as_of=query.as_of.date(),
+            registry=self._registry,
+        )
+        symbols = list(resolved.symbols)
+        if not symbols:
+            return []
+
+        window_start, window_end = self._resolve_window(query)
+        gaps = self._coverage_gaps(symbols, window_start, window_end)
+        if gaps:
+            raise CoverageGapError(
+                f"coverage gaps for {len(gaps)} symbol(s) in "
+                f"window {window_start.isoformat()} → {window_end.isoformat()}",
+                missing=gaps,
+            )
+
+        keys = [f"{self._provider}/{sym}/bars/{self._timeframe}" for sym in symbols]
+        result = self._store.read_multi(keys, start=window_start, end=window_end)
+        if result.missing_keys:
+            missing = [
+                (key.split("/")[1], [(window_start, window_end)]) for key in result.missing_keys
+            ]
+            raise CoverageGapError(
+                f"store returned no files for {len(result.missing_keys)} covered key(s)",
+                missing=missing,
+            )
+        if result.data.is_empty():
+            return []
+
+        bars, _split_events = self._apply_split_handling(
+            result.data,
+            query.split_handling,
+            window_start=window_start,
+            window_end=window_end,
+        )
+
+        evaluator = AnchorEvaluator(
+            predicate=query.predicate,
+            scan_run_id=scan_run_id,
+            scan_query_version=_query_version(query),
+            metric_version=query.predicate.metric_version,
+            resolved_universe_version=universe_hash(symbols),
+        )
+        anchors: list[MeanReversionAnchor] = []
+        for symbol, group in bars.group_by("symbol", maintain_order=True):
+            sym = str(symbol[0]) if isinstance(symbol, tuple) else str(symbol)
+            anchors.extend(evaluator.evaluate_symbol(sym, group))
+
+        anchors = sorted(anchors, key=lambda anchor: abs(anchor.excursion_units), reverse=True)
+        if query.limit is not None:
+            anchors = anchors[: query.limit]
+
+        if query.tradable_ref is not None:
+            tradable = self._data_service.resolve_universe(
+                query.tradable_ref,
+                as_of=query.as_of.date(),
+                registry=self._registry,
+            )
+            tradable_set = {str(s).upper() for s in tradable.symbols}
+            anchors = [anchor for anchor in anchors if anchor.symbol.upper() in tradable_set]
+
+        self._log_event(
+            "mean_reversion_scan_completed",
+            scan_run_id=scan_run_id,
+            correlation_id=correlation_id,
+            sweep_id=sweep_id,
+            result_count=len(anchors),
+        )
+        return anchors
 
     def sweep(
         self,
@@ -620,6 +706,10 @@ def _to_float(value: object) -> float:
 
 def _scan_run_id(query: ScanQuery) -> str:
     return str(uuid5(NAMESPACE_URL, query.model_dump_json()))
+
+
+def _query_version(query: ScanQuery) -> str:
+    return hashlib.sha256(query.model_dump_json().encode("utf-8")).hexdigest()[:16]
 
 
 def _template_hash(template: ScanQueryTemplate) -> str:

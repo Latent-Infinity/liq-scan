@@ -26,10 +26,11 @@ from liq.data.manifest import CoverageManifest, CoverageRange
 from liq.data.service import DataService
 from liq.scan.engine import ScanEngine
 from liq.scan.exceptions import CoverageGapError
-from liq.scan.predicates import MovePredicate
+from liq.scan.predicates import MeanReversionExcursionPredicate, MovePredicate
 from liq.scan.query import ScanQuery
 from liq.scan.window import TradingMinutesWindow
 from liq.store.parquet import ParquetStore
+from tests.real_market_data import REAL_SYMBOL, link_real_spy_data
 
 # ----- fixtures -------------------------------------------------------------
 
@@ -214,6 +215,48 @@ class TestScanEngineCorrectness:
         )
         results = engine.execute(query)
         assert all(r.metric_version == "midrange-endpoint-v1" for r in results)
+
+
+class TestMeanReversionEngine:
+    def test_execute_mean_reversion_emits_real_fixture_anchors(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from liq.data.settings import get_settings, get_store
+
+        monkeypatch.setenv("DATA_ROOT", str(tmp_path))
+        get_settings.cache_clear()
+        get_store.cache_clear()
+        link_real_spy_data(tmp_path)
+
+        store = ParquetStore(str(tmp_path))
+        engine = ScanEngine(data_service=DataService(), store=store)
+        metric_version = "midrange-excursion-v1"
+        query = ScanQuery(
+            universe_ref=[REAL_SYMBOL],
+            tradable_ref=[REAL_SYMBOL],
+            as_of=datetime(2024, 6, 3, 20, 0, tzinfo=UTC),
+            window=TradingMinutesWindow(kind="trading_minutes", n=390),
+            predicate=MeanReversionExcursionPredicate(
+                K=0.1,
+                L_vol=20,
+                L_base=20,
+                base_kind="roll_mean",
+                direction="both",
+                metric_version=metric_version,
+            ),
+            limit=3,
+        )
+
+        anchors = engine.execute_mean_reversion(query)
+
+        assert 0 < len(anchors) <= 3
+        assert all(anchor.symbol == REAL_SYMBOL for anchor in anchors)
+        assert all(anchor.metric_version == metric_version for anchor in anchors)
+        assert all(anchor.anchor_event_id for anchor in anchors)
+        get_settings.cache_clear()
+        get_store.cache_clear()
 
 
 class TestCoverageGap:
