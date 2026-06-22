@@ -11,6 +11,7 @@ never touch the store. The engine assembles the inputs per symbol.
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -27,6 +28,18 @@ class PredicateInput(BaseModel):
     dollar_volume: Decimal
     price: Decimal
     bar_count: int
+
+
+class MeanReversionPredicateInput(PredicateInput):
+    """Precomputed mean-reversion row fed to the anchor predicate."""
+
+    midrange_now: Decimal
+    midrange_base: Decimal
+    excursion_units: Decimal
+    vol_t: Decimal
+    bar_index: int = Field(ge=0)
+    anchor_ts: datetime
+    quality_flags: tuple[str, ...] = ()
 
 
 Direction = Literal["up", "down", "either"]
@@ -77,6 +90,27 @@ class PricePredicate(_BasePredicate):
         return row.price >= self.min_usd
 
 
+class MeanReversionExcursionPredicate(_BasePredicate):
+    """Threshold/sign decision over precomputed excursion units."""
+
+    K: float = Field(gt=0.0)
+    L_vol: int = Field(gt=0)
+    L_base: int = Field(gt=0)
+    base_kind: Literal["roll_extreme", "roll_mean"]
+    direction: Literal["up", "down", "both"]
+    metric_version: str
+
+    def evaluate(self, row: PredicateInput) -> bool:
+        if not isinstance(row, MeanReversionPredicateInput):
+            return False
+        units = float(row.excursion_units)
+        if self.direction == "up":
+            return units >= self.K
+        if self.direction == "down":
+            return units <= -self.K
+        return abs(units) >= self.K
+
+
 class AndPredicate(_BasePredicate):
     """Logical AND across a list of child predicates.
 
@@ -90,7 +124,13 @@ class AndPredicate(_BasePredicate):
         return all(child.evaluate(row) for child in self.predicates)
 
 
-AnyPredicate = MovePredicate | DollarVolumePredicate | PricePredicate | AndPredicate
+AnyPredicate = (
+    MovePredicate
+    | DollarVolumePredicate
+    | PricePredicate
+    | MeanReversionExcursionPredicate
+    | AndPredicate
+)
 """Union of every concrete predicate. Used as the field type on ``ScanQuery``."""
 
 
@@ -102,6 +142,8 @@ __all__ = [
     "AnyPredicate",
     "Direction",
     "DollarVolumePredicate",
+    "MeanReversionExcursionPredicate",
+    "MeanReversionPredicateInput",
     "MovePredicate",
     "PredicateInput",
     "PricePredicate",

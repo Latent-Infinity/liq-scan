@@ -15,6 +15,8 @@ from pydantic import ValidationError
 from liq.scan.predicates import (
     AndPredicate,
     DollarVolumePredicate,
+    MeanReversionExcursionPredicate,
+    MeanReversionPredicateInput,
     MovePredicate,
     PredicateInput,
     PricePredicate,
@@ -84,6 +86,53 @@ class TestPricePredicate:
         p = PricePredicate(min_usd=Decimal("5"))
         assert p.evaluate(_row(price=5.01))
         assert not p.evaluate(_row(price=4.99))
+
+
+# ----- MeanReversionExcursionPredicate --------------------------------------
+
+
+class TestMeanReversionExcursionPredicate:
+    def _row(self, units: str) -> MeanReversionPredicateInput:
+        return MeanReversionPredicateInput(
+            symbol="X",
+            move_pct=0.0,
+            dollar_volume=Decimal("0"),
+            price=Decimal("100"),
+            bar_count=10,
+            midrange_now=Decimal("106"),
+            midrange_base=Decimal("100"),
+            excursion_units=Decimal(units),
+            vol_t=Decimal("2"),
+            bar_index=3,
+            anchor_ts="2024-06-03T13:33:00Z",
+        )
+
+    def test_up_direction_only_accepts_positive_excursions(self) -> None:
+        predicate = MeanReversionExcursionPredicate(
+            K=2.0,
+            L_vol=3,
+            L_base=3,
+            base_kind="roll_mean",
+            direction="up",
+            metric_version="midrange-excursion-v1",
+        )
+
+        assert predicate.evaluate(self._row("2.0"))
+        assert not predicate.evaluate(self._row("-3.0"))
+
+    def test_both_direction_is_union_of_up_and_down(self) -> None:
+        predicate = MeanReversionExcursionPredicate(
+            K=2.0,
+            L_vol=3,
+            L_base=3,
+            base_kind="roll_mean",
+            direction="both",
+            metric_version="midrange-excursion-v1",
+        )
+
+        assert predicate.evaluate(self._row("2.0"))
+        assert predicate.evaluate(self._row("-2.0"))
+        assert not predicate.evaluate(self._row("1.99"))
 
 
 # ----- AndPredicate ---------------------------------------------------------
