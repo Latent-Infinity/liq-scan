@@ -23,6 +23,8 @@ class GateOutcome:
 
 
 def _market_beta(row: ResilienceScanInput, cfg: MarketBehaviorGateConfig) -> GateOutcome:
+    # Keep the historical gate label for compatibility; the estimator is
+    # effectively up to 5y (min(configured_cap, available_history)).
     return GateOutcome("market_beta_5y", row.market_beta <= cfg.max_market_beta)
 
 
