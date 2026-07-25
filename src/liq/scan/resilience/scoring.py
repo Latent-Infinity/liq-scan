@@ -14,6 +14,7 @@ from datetime import datetime
 
 from liq.scan.resilience.models import (
     Classification,
+    FundamentalScanInput,
     PriceShockScoreConfig,
     ResilienceResult,
     ResilienceScanInput,
@@ -83,12 +84,19 @@ def classify(asd25: float) -> Classification:
 
 
 def rank_results(results: Iterable[ResilienceResult]) -> list[ResilienceResult]:
-    """Order results by ASD-25 ascending, price-shock score descending.
+    """Order results by ASD-25 ascending, resilience score descending.
 
-    Lower estimated drawdown ranks first; the scorecard breaks ties as the
-    confidence signal (§1 ranking tuple, tape subset).
+    Lower estimated drawdown ranks first; the 0–100 resilience score (or the
+    price-shock score when the scorecard is absent) breaks ties as the
+    confidence signal (§1 ranking tuple).
     """
-    return sorted(results, key=lambda r: (r.asd25_tape, -r.price_shock_score))
+    return sorted(
+        results,
+        key=lambda r: (
+            r.asd25,
+            -(r.resilience_score if r.resilience_score is not None else r.price_shock_score),
+        ),
+    )
 
 
 def build_result(
@@ -100,21 +108,42 @@ def build_result(
     failed_gates: Sequence[str],
     shock: ShockScenarioConfig | None = None,
     score_cfg: PriceShockScoreConfig | None = None,
+    fundamental_drawdown: float | None = None,
+    implied_growth: float | None = None,
+    fundamentals: FundamentalScanInput | None = None,
+    resilience_score: float | None = None,
+    score_earned: float | None = None,
+    score_available: float | None = None,
 ) -> ResilienceResult:
-    """Assemble a :class:`ResilienceResult` from a stats row and gate outcome."""
+    """Assemble a :class:`ResilienceResult`.
+
+    ``asd25 = max(fundamental_drawdown, tape_drawdown)`` when a fundamental
+    drawdown is supplied (the deliberately conservative worse-of estimate),
+    else the tape estimate alone. Classification bands off the full ASD-25.
+    The renormalized 0–100 ``resilience_score`` is computed by the caller
+    (``resilience_scorecard``) and passed in to avoid an import cycle.
+    """
     score_cfg = score_cfg or PriceShockScoreConfig()
     td = tape_drawdown(stats, shock)
+    asd25 = td if fundamental_drawdown is None else max(td, fundamental_drawdown)
     return ResilienceResult(
         symbol=symbol,
         as_of=as_of,
+        asd25=asd25,
         asd25_tape=td,
         tape_drawdown=td,
-        classification=classify(td),
+        fundamental_drawdown=fundamental_drawdown,
+        implied_growth=implied_growth,
+        classification=classify(asd25),
         price_shock_score=price_shock_score(stats, score_cfg),
         price_shock_max=score_cfg.total_points,
+        resilience_score=resilience_score,
+        score_earned=score_earned,
+        score_available=score_available,
         gate_pass=gate_pass,
         failed_gates=tuple(failed_gates),
         stats=stats,
+        fundamentals=fundamentals,
     )
 
 

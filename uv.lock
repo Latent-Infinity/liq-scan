@@ -742,6 +742,7 @@ dependencies = [
     { name = "joblib" },
     { name = "liq-core" },
     { name = "liq-data" },
+    { name = "liq-fractal" },
     { name = "liq-store" },
     { name = "liq-ta" },
     { name = "numpy" },
@@ -758,6 +759,7 @@ requires-dist = [
     { name = "joblib", specifier = ">=1.4" },
     { name = "liq-core", editable = "../liq-core" },
     { name = "liq-data", editable = "../liq-data" },
+    { name = "liq-fractal", editable = "../liq-fractal" },
     { name = "liq-store", editable = "../liq-store" },
     { name = "liq-ta", editable = "../liq-ta/crates/liq-ta-python" },
     { name = "liq-validation", marker = "extra == 'dev'", editable = "../liq-validation" },
@@ -778,6 +780,25 @@ requires-dist = [
     { name = "xxhash", marker = "extra == 'xxhash'", specifier = ">=3.0.0" },
 ]
 provides-extras = ["xxhash", "selection", "all", "dev"]
+
+[[package]]
+name = "liq-fractal"
+version = "0.1.0"
+source = { editable = "../liq-fractal" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14" },
+    { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.1" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "liq-scan"

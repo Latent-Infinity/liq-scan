@@ -118,31 +118,218 @@ class PriceShockScoreConfig(BaseModel):
         )
 
 
-class ResilienceResult(BaseModel):
-    """One ranked row of tape-resilience output.
+BusinessType = Literal[
+    "ai_accelerator",
+    "semi_equipment",
+    "foundry_memory",
+    "diversified_semi",
+    "hyperscaler",
+    "saas_software",
+    "diversified_tech",
+    "diversified_market",
+]
 
-    ``asd25_tape`` is the tape half of ASD-25 (a positive drawdown
-    fraction); ``fundamental`` drawdown is folded in later. ``gate_pass``
-    is ``False`` when any hard gate fails, with the failing gate ids in
-    ``failed_gates``.
+
+class BusinessProfile(BaseModel):
+    """Per-business-type stress and threshold parameters.
+
+    ``fcf_haircut``/``growth_haircut`` translate the Appendix A.1 revenue and
+    margin shocks into a stressed FCF and a stressed growth used by the DCF.
+    They are a modeling choice (initial spec, tunable/ablatable, frozen at
+    first backtest). ``max_net_debt_to_ebitda`` and ``min_fcf_yield`` carry
+    the business-model-specific gate thresholds (Appendix A.2/A.3).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    fcf_haircut: float = Field(ge=0.0, le=1.0)
+    growth_haircut: float = Field(ge=0.0)
+    max_net_debt_to_ebitda: float = Field(gt=0.0)
+    min_fcf_yield: float = Field(ge=0.0)
+
+
+# Defaults derived from Appendix A.1/A.2/A.3 (software & fabless leverage ≤1.5×,
+# foundry/equipment ≤2.0×; software FCF-yield floor 3%, cyclical semi 4%).
+BUSINESS_PROFILES: dict[str, BusinessProfile] = {
+    "ai_accelerator": BusinessProfile(
+        fcf_haircut=0.40, growth_haircut=0.10, max_net_debt_to_ebitda=1.5, min_fcf_yield=0.04
+    ),
+    "semi_equipment": BusinessProfile(
+        fcf_haircut=0.35, growth_haircut=0.08, max_net_debt_to_ebitda=2.0, min_fcf_yield=0.04
+    ),
+    "foundry_memory": BusinessProfile(
+        fcf_haircut=0.40, growth_haircut=0.08, max_net_debt_to_ebitda=2.0, min_fcf_yield=0.04
+    ),
+    "diversified_semi": BusinessProfile(
+        fcf_haircut=0.25, growth_haircut=0.05, max_net_debt_to_ebitda=1.5, min_fcf_yield=0.04
+    ),
+    "hyperscaler": BusinessProfile(
+        fcf_haircut=0.25, growth_haircut=0.06, max_net_debt_to_ebitda=1.5, min_fcf_yield=0.03
+    ),
+    "saas_software": BusinessProfile(
+        fcf_haircut=0.30, growth_haircut=0.08, max_net_debt_to_ebitda=1.5, min_fcf_yield=0.03
+    ),
+    "diversified_tech": BusinessProfile(
+        fcf_haircut=0.20, growth_haircut=0.03, max_net_debt_to_ebitda=1.5, min_fcf_yield=0.03
+    ),
+    # Generic, non-AI profile for a *general* market shock: only a mild uniform
+    # earnings haircut (the WACC/terminal macro shocks drive most of the
+    # valuation compression), so the fundamental drawdown is dominated by a
+    # name's implied-growth richness rather than an AI-specific revenue collapse.
+    # Defensives (low implied growth) barely compress; rich multiples compress.
+    "diversified_market": BusinessProfile(
+        fcf_haircut=0.10, growth_haircut=0.02, max_net_debt_to_ebitda=2.5, min_fcf_yield=0.03
+    ),
+}
+
+
+class DcfConfig(BaseModel):
+    """Base discounted-cash-flow assumptions (before stress)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    wacc_base: float = Field(default=0.09, gt=0.0)
+    terminal_growth: float = Field(default=0.025, ge=0.0)
+    horizon_years: int = Field(default=10, gt=0)
+    wacc_stress_add: float = Field(default=0.02, ge=0.0)  # +200 bps
+    terminal_growth_stress_cut: float = Field(default=0.01, ge=0.0)  # −100 bps
+
+
+BacklogRisk = Literal["low", "modeled", "high"]
+
+
+class AiDependencyInput(BaseModel):
+    """AI-dependency metrics (Appendix A.5), mostly 10-K-prose-sourced.
+
+    Only ``inventory_growth_vs_sales`` is derivable from structured XBRL; the
+    rest come from a real, provenance-tracked overlay and are ``None`` when not
+    sourced (the gate and scorecard treat them as ``UNSCORED`` — never
+    fabricated). Shares are fractions of the relevant base (0.25 == 25%).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    inventory_growth_vs_sales: float | None = None  # structured (XBRL)
+    ai_infra_revenue_share: float | None = None
+    hyperscaler_capex_dependence: float | None = None  # look-through
+    largest_customer_share: float | None = None
+    top5_customer_share: float | None = None
+    single_product_gross_profit_share: float | None = None
+    non_ai_revenue_share: float | None = None
+    backlog_cancellation_risk: BacklogRisk | None = None
+
+
+class AiDependencyGateConfig(BaseModel):
+    """Hard/preferred-gate thresholds for the AI-dependency layer (A.5)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    max_ai_infra_revenue_share: float = 0.25
+    max_hyperscaler_capex_dependence: float = 0.30
+    max_largest_customer_share: float = 0.15
+    max_top5_customer_share: float = 0.40
+    max_single_product_gross_profit_share: float = 0.40
+    max_inventory_growth_vs_sales: float = 0.10  # "must not materially exceed sales"
+
+
+class FundamentalGateConfig(BaseModel):
+    """Hard-gate thresholds for the financial-survival + valuation layers (A.2/A.3)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    min_interest_coverage: float = 10.0
+    max_share_count_growth: float = 0.02
+    max_sbc_to_fcf: float = 0.30
+    historical_fcf_positive_min: int = 4  # of last 5 years
+    historical_fcf_years: int = 5
+    max_implied_growth: float = 0.15  # IGB-10
+    max_stressed_dcf_downside: float = 0.20
+    min_cash_runway_years: float = 4.0  # unprofitable names
+    ai_dependency: AiDependencyGateConfig = AiDependencyGateConfig()
+    profiles: dict[str, BusinessProfile] = Field(default_factory=lambda: dict(BUSINESS_PROFILES))
+
+
+class FundamentalScanInput(BaseModel):
+    """Per-symbol fundamentals contract fed to the fundamental gates + DCF.
+
+    Built by the harness from a real ``FundamentalsSnapshot`` (``liq-data``)
+    plus a market cap (shares × price). Any field may be ``None`` when the
+    filer did not tag it; the gate layer marks such checks ``UNSCORED`` rather
+    than fabricate a value. ``liq-scan`` never imports ``liq-data`` — this is
+    the boundary contract.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    business_type: BusinessType
+    market_cap: float = Field(gt=0.0)
+    fcf: float | None = None
+    ebitda: float | None = None
+    net_debt: float | None = None
+    interest_coverage: float | None = None
+    diluted_share_growth: float | None = None
+    sbc_to_fcf: float | None = None
+    fcf_positive_years: int = 0
+    fcf_considered_years: int = 0
+    is_profitable: bool = True
+    cash_runway_years: float | None = None
+    ai_dependency: AiDependencyInput | None = None
+
+    @property
+    def fcf_yield(self) -> float | None:
+        if self.fcf is None:
+            return None
+        return self.fcf / self.market_cap
+
+    @property
+    def net_debt_to_ebitda(self) -> float | None:
+        if self.net_debt is None or self.ebitda is None or self.ebitda == 0.0:
+            return None
+        return self.net_debt / self.ebitda
+
+
+class ResilienceResult(BaseModel):
+    """One ranked row of resilience output.
+
+    ``asd25`` is ``max(fundamental_drawdown, tape_drawdown)`` when a
+    fundamental drawdown is available, else the tape estimate alone
+    (``asd25_tape``). ``gate_pass`` is ``False`` when any applicable hard gate
+    (tape and/or fundamental) fails, with failing gate ids in ``failed_gates``.
     """
 
     model_config = ConfigDict(frozen=True)
 
     symbol: str
     as_of: datetime
+    asd25: float
     asd25_tape: float
     tape_drawdown: float
+    fundamental_drawdown: float | None = None
+    implied_growth: float | None = None
     classification: Classification
     price_shock_score: float
     price_shock_max: float
+    resilience_score: float | None = None  # renormalized 0–100 scorecard
+    score_earned: float | None = None
+    score_available: float | None = None
     gate_pass: bool
     failed_gates: tuple[str, ...] = ()
     stats: ResilienceScanInput
+    fundamentals: FundamentalScanInput | None = None
 
 
 __all__ = [
+    "BUSINESS_PROFILES",
+    "AiDependencyGateConfig",
+    "AiDependencyInput",
+    "BacklogRisk",
+    "BusinessProfile",
+    "BusinessType",
     "Classification",
+    "DcfConfig",
+    "FundamentalGateConfig",
+    "FundamentalScanInput",
     "MarketBehaviorGateConfig",
     "PriceShockScoreConfig",
     "ResilienceResult",
