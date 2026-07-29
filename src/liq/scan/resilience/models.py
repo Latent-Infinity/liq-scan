@@ -55,7 +55,11 @@ class MarketBehaviorGateConfig(BaseModel):
     max_market_beta: float = 1.15
     max_downside_beta_qqq: float = 0.90
     max_downside_beta_soxx: float = 0.85
-    max_es95_ratio_qqq: float = 0.80
+    # Recalibrated from 0.80 → 1.25: the original bar required a single stock to
+    # be *less* tail-risky than 80% of the (diversified) QQQ index, which almost
+    # no individual name is. 1.25 flags names materially more tail-risky than the
+    # market while passing market-like ones. (Initial spec, frozen at backtest.)
+    max_es95_ratio_qqq: float = 1.25
     max_drawdown: float = 0.35
     max_recovery_periods: int = 252  # ~12 months of trading days
 
@@ -128,6 +132,11 @@ BusinessType = Literal[
     "diversified_tech",
     "diversified_market",
 ]
+
+# Coarse sector, used only to switch off gates whose metric is economically
+# meaningless for that sector (FCF/EBITDA/leverage for financials, REITs, and
+# capex-heavy utilities). Classified from SEC SIC codes.
+Sector = Literal["operating", "financial", "reit", "utility"]
 
 
 class BusinessProfile(BaseModel):
@@ -238,12 +247,22 @@ class FundamentalGateConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     min_interest_coverage: float = 10.0
+    # Regulated utilities carry structurally high leverage (stable cash flows
+    # support ~5–6× net-debt/EBITDA and ~2.5–4× coverage), so the operating
+    # bars would fail every one. These sector-appropriate bars replace them.
+    utility_max_net_debt_to_ebitda: float = 6.0
+    utility_min_interest_coverage: float = 2.5
     max_share_count_growth: float = 0.02
     max_sbc_to_fcf: float = 0.30
     historical_fcf_positive_min: int = 4  # of last 5 years
     historical_fcf_years: int = 5
     max_implied_growth: float = 0.15  # IGB-10
     max_stressed_dcf_downside: float = 0.20
+    # Stressed DCF is informational by default: it already *is* the fundamental
+    # drawdown feeding ASD-25 (so gating on it double-counts), and under the
+    # severe standardized shock it fails almost every valued name — a
+    # non-discriminating gate. Set True to re-enable it as a hard gate.
+    stressed_dcf_gates: bool = False
     min_cash_runway_years: float = 4.0  # unprofitable names
     ai_dependency: AiDependencyGateConfig = AiDependencyGateConfig()
     profiles: dict[str, BusinessProfile] = Field(default_factory=lambda: dict(BUSINESS_PROFILES))
@@ -263,6 +282,7 @@ class FundamentalScanInput(BaseModel):
 
     symbol: str
     business_type: BusinessType
+    sector: Sector = "operating"
     market_cap: float = Field(gt=0.0)
     fcf: float | None = None
     ebitda: float | None = None
@@ -334,5 +354,6 @@ __all__ = [
     "PriceShockScoreConfig",
     "ResilienceResult",
     "ResilienceScanInput",
+    "Sector",
     "ShockScenarioConfig",
 ]

@@ -46,24 +46,39 @@ def evaluate_fundamental_gates(
     profile = cfg.profiles[inp.business_type]
     drawdown, igb = fundamental_drawdown(inp, profile, dcf_cfg)
 
+    # Sector-aware applicability: free-cash-flow gates are meaningful only for
+    # operating companies; leverage/coverage additionally for utilities (real
+    # regulated debt). Financials and REITs have no comparable FCF/EBITDA, so
+    # those gates are UNSCORED for them (not failed) — the tape, valuation, and
+    # dilution gates still apply.
+    fcf_applies = inp.sector == "operating"
+    leverage_applies = inp.sector in ("operating", "utility")
+
     outcomes: list[GateOutcome] = []
 
     # -- financial survival (A.2) --
-    outcomes.append(
-        GateOutcome("ttm_fcf_positive", inp.fcf > 0.0)
-        if inp.fcf is not None
-        else _na("ttm_fcf_positive")
-    )
-    if inp.fcf_considered_years >= cfg.historical_fcf_years:
+    if fcf_applies and inp.fcf is not None:
+        outcomes.append(GateOutcome("ttm_fcf_positive", inp.fcf > 0.0))
+    else:
+        outcomes.append(_na("ttm_fcf_positive"))
+    if fcf_applies and inp.fcf_considered_years >= cfg.historical_fcf_years:
         outcomes.append(
             GateOutcome("historical_fcf", inp.fcf_positive_years >= cfg.historical_fcf_positive_min)
         )
     else:
         outcomes.append(_na("historical_fcf"))
-    outcomes.append(
-        _le("net_debt_to_ebitda", inp.net_debt_to_ebitda, profile.max_net_debt_to_ebitda)
-    )
-    outcomes.append(_ge("interest_coverage", inp.interest_coverage, cfg.min_interest_coverage))
+    if leverage_applies:
+        if inp.sector == "utility":
+            max_leverage = cfg.utility_max_net_debt_to_ebitda
+            min_coverage = cfg.utility_min_interest_coverage
+        else:
+            max_leverage = profile.max_net_debt_to_ebitda
+            min_coverage = cfg.min_interest_coverage
+        outcomes.append(_le("net_debt_to_ebitda", inp.net_debt_to_ebitda, max_leverage))
+        outcomes.append(_ge("interest_coverage", inp.interest_coverage, min_coverage))
+    else:
+        outcomes.append(_na("net_debt_to_ebitda"))
+        outcomes.append(_na("interest_coverage"))
     # Cash runway applies only to currently-unprofitable names.
     if inp.is_profitable:
         outcomes.append(_na("cash_runway"))
@@ -73,9 +88,17 @@ def evaluate_fundamental_gates(
     outcomes.append(_le("sbc_to_fcf", inp.sbc_to_fcf, cfg.max_sbc_to_fcf))
 
     # -- valuation (A.3) --
+    # IGB and FCF-yield auto-UNSCORE for non-FCF sectors (their inputs are None).
     outcomes.append(_le("implied_growth_igb10", igb, cfg.max_implied_growth))
-    outcomes.append(_ge("fcf_yield", inp.fcf_yield, profile.min_fcf_yield))
-    outcomes.append(_le("stressed_dcf_downside", drawdown, cfg.max_stressed_dcf_downside))
+    outcomes.append(
+        _ge("fcf_yield", inp.fcf_yield, profile.min_fcf_yield) if fcf_applies else _na("fcf_yield")
+    )
+    # Stressed DCF is informational unless explicitly enabled (it already feeds
+    # ASD-25); demoting it avoids double-counting the fundamental drawdown.
+    if cfg.stressed_dcf_gates:
+        outcomes.append(_le("stressed_dcf_downside", drawdown, cfg.max_stressed_dcf_downside))
+    else:
+        outcomes.append(_na("stressed_dcf_downside"))
 
     # -- AI dependency (A.5) --
     outcomes.extend(_ai_dependency_gates(inp, cfg))

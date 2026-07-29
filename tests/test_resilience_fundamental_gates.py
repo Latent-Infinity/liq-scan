@@ -124,8 +124,62 @@ class TestValuationGates:
         assert igb is not None and igb > 0.15
         assert "implied_growth_igb10" in failed
         assert "fcf_yield" in failed
+        # Stressed DCF still computes (feeds ASD-25) but is informational by
+        # default — not a hard gate (avoids double-counting the drawdown).
         assert dd is not None and dd > 0.20
+        assert "stressed_dcf_downside" not in failed
+
+    def test_stressed_dcf_can_be_re_enabled_as_gate(self) -> None:
+        from liq.scan.resilience import FundamentalGateConfig
+
+        cfg = FundamentalGateConfig(stressed_dcf_gates=True)
+        _, failed, _, _, _ = evaluate_fundamental_gates(_fund(market_cap=6_000.0, fcf=60.0), cfg)
         assert "stressed_dcf_downside" in failed
+
+
+class TestSectorAwareGates:
+    def test_financial_unscored_on_fcf_and_leverage(self) -> None:
+        # A bank-like name: FCF/EBITDA/leverage gates are not applicable.
+        _, _, outcomes, _, _ = evaluate_fundamental_gates(
+            _fund(sector="financial", fcf=-50.0, net_debt=None, interest_coverage=None)
+        )
+        ids = {o.gate_id: o.applicable for o in outcomes}
+        for g in (
+            "ttm_fcf_positive",
+            "historical_fcf",
+            "fcf_yield",
+            "net_debt_to_ebitda",
+            "interest_coverage",
+        ):
+            assert ids[g] is False  # UNSCORED, not failed
+
+    def test_utility_keeps_leverage_drops_fcf(self) -> None:
+        _, _, outcomes, _, _ = evaluate_fundamental_gates(
+            _fund(sector="utility", fcf=-30.0, net_debt=200.0, ebitda=100.0, interest_coverage=6.0)
+        )
+        ids = {o.gate_id: o for o in outcomes}
+        assert ids["ttm_fcf_positive"].applicable is False  # FCF dropped
+        assert ids["net_debt_to_ebitda"].applicable is True  # leverage kept
+        assert ids["interest_coverage"].applicable is True
+
+    def test_operating_negative_fcf_still_fails(self) -> None:
+        _, failed, _, _, _ = evaluate_fundamental_gates(_fund(sector="operating", fcf=-10.0))
+        assert "ttm_fcf_positive" in failed
+
+    def test_utility_leverage_uses_sector_bar(self) -> None:
+        # 5× net-debt/EBITDA + 3× coverage: normal for a regulated utility →
+        # passes under the utility bars, but fails under the operating bars.
+        util = _fund(
+            sector="utility", fcf=-30.0, net_debt=500.0, ebitda=100.0, interest_coverage=3.0
+        )
+        _, failed_u, _, _, _ = evaluate_fundamental_gates(util)
+        assert "net_debt_to_ebitda" not in failed_u
+        assert "interest_coverage" not in failed_u
+
+        op = _fund(sector="operating", net_debt=500.0, ebitda=100.0, interest_coverage=3.0)
+        _, failed_o, _, _, _ = evaluate_fundamental_gates(op)
+        assert "net_debt_to_ebitda" in failed_o
+        assert "interest_coverage" in failed_o
 
 
 class TestAsd25Combination:

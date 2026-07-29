@@ -58,9 +58,15 @@ class TestMarketBehaviorGates:
         assert "downside_beta_qqq" in failed
 
     def test_es_ratio_and_drawdown_fail(self) -> None:
-        _, failed, _ = evaluate_market_behavior_gates(_row(es95_ratio_qqq=0.9, max_drawdown=0.5))
+        # es95 recalibrated to 1.25; a name materially more tail-risky than QQQ
+        # (ratio > 1.25) still trips it.
+        _, failed, _ = evaluate_market_behavior_gates(_row(es95_ratio_qqq=1.4, max_drawdown=0.5))
         assert "es95_ratio_qqq" in failed
         assert "max_drawdown_3y" in failed
+
+    def test_market_like_tail_risk_passes_es_ratio(self) -> None:
+        _, failed, _ = evaluate_market_behavior_gates(_row(es95_ratio_qqq=1.1))
+        assert "es95_ratio_qqq" not in failed
 
     def test_recovery_never_recovered_fails(self) -> None:
         _, failed, _ = evaluate_market_behavior_gates(_row(recovery_periods=None))

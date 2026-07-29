@@ -32,6 +32,7 @@ from liq.scan.resilience.models import (
     PriceShockScoreConfig,
     ResilienceResult,
     ResilienceScanInput,
+    Sector,
     ShockScenarioConfig,
 )
 from liq.scan.resilience.scorecard import (
@@ -70,6 +71,7 @@ __all__ = [
     "ResilienceScore",
     "ScoreComponent",
     "ScorecardConfig",
+    "Sector",
     "ShockScenarioConfig",
     "build_result",
     "classify",
