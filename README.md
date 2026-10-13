@@ -62,6 +62,25 @@ liq-scan sweep \
   --output json
 ```
 
+## Classical ranker selection
+
+`liq.scan.classical_ranker.select_classical_ranker` is a pure monthly diagnostic
+selector for the fixed five classical champions. It requires the existing
+`features` extra and accepts an explicit calendar formation, cohort, identity/basis
+metadata and nullable causal feature values. It neither loads market data nor
+accepts future returns, fills or orders.
+
+Missing features produce champion-specific exclusions. The gated composite uses
+the complete four-component intersection with equal weights; unavailable breadth
+is distinct from an off regime. Final score ties use immutable security IDs, and
+the top and bottom deciles come from one order so they remain disjoint. Outputs
+are immutable diagnostic memberships, never a funded portfolio or short orders.
+
+The rules are a prospective Oracle-approved interpretation. Source-free refusal
+controls are verified; real numerical selector fixtures and historical parity
+remain unverified. Existing research admission, portfolio and calibration gates
+must be satisfied separately before real scoring or evaluation.
+
 ## Development
 
 ```bash
